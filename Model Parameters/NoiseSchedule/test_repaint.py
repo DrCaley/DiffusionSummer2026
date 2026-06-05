@@ -11,15 +11,15 @@ Output:
     Saves a 2x2 visualisation for --sample to model_{schedule}_results/test_result.png
 
 Usage (run from workspace root):
-    python3 NoiseSchedule/test_repaint.py --schedule cosine
-    python3 NoiseSchedule/test_repaint.py --schedule linear --sample 3 --max_samples 10
+    python3 "Model Parameters/NoiseSchedule/test_repaint.py" --schedule cosine
+    python3 "Model Parameters/NoiseSchedule/test_repaint.py" --schedule linear --sample 3 --max_samples 10
 """
 
 import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -100,10 +100,11 @@ def main():
     if args.checkpoint is None:
         args.checkpoint = os.path.join(
             script_dir,
+            "checkpoints",
             f"checkpoints_repaint_{args.schedule}",
             f"best_model_{args.schedule}.pt",
         )
-    out_dir = os.path.join(script_dir, f"model_{args.schedule}_results")
+    out_dir = os.path.join(script_dir, "results", f"model_{args.schedule}_results")
     if args.out is None:
         args.out = os.path.join(out_dir, "test_result.png")
 

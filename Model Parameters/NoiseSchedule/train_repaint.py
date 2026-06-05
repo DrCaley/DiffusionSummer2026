@@ -5,17 +5,17 @@ Trains the Repaint UNet (identical architecture to DDPM/model.py UNet) under
 four different noise schedules: linear, cosine, quadratic, sigmoid.
 
 Usage (run from workspace root):
-    python3 NoiseSchedule/train_repaint.py --schedule cosine
-    python3 NoiseSchedule/train_repaint.py --schedule linear --epochs 100 --batch 32
-    python3 NoiseSchedule/train_repaint.py --schedule quadratic
-    python3 NoiseSchedule/train_repaint.py --schedule sigmoid
+    python3 "Model Parameters/NoiseSchedule/train_repaint.py" --schedule cosine
+    python3 "Model Parameters/NoiseSchedule/train_repaint.py" --schedule linear --epochs 100 --batch 32
+    python3 "Model Parameters/NoiseSchedule/train_repaint.py" --schedule quadratic
+    python3 "Model Parameters/NoiseSchedule/train_repaint.py" --schedule sigmoid
 """
 
 import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from torch.utils.data import DataLoader
@@ -61,7 +61,7 @@ def main():
     script_dir = os.path.dirname(__file__)
     if args.save_dir is None:
         args.save_dir = os.path.join(
-            script_dir, f"checkpoints_repaint_{args.schedule}"
+            script_dir, "checkpoints", f"checkpoints_repaint_{args.schedule}"
         )
 
     print(f"Device   : {device}")

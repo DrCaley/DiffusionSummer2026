@@ -8,10 +8,26 @@ import torch.nn.functional as F
 # ---------------------------------------------------------------------------
 # Load loss_functions.py from Model Parameters/ via importlib so this file
 # can be imported from any working directory.
+# Searches up to 3 levels above this file's location so the same diffusion.py
+# works both when installed under DDPM/model/ (local) and at the repo root
+# (remote server with flat structure).
 # ---------------------------------------------------------------------------
-_lf_path = os.path.join(
-    os.path.dirname(__file__), "..", "..", "Model Parameters", "loss_functions.py"
-)
+_lf_path = None
+for _up in range(4):
+    _candidate = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *(['..'] * _up),
+        "Model Parameters",
+        "loss_functions.py",
+    ))
+    if os.path.isfile(_candidate):
+        _lf_path = _candidate
+        break
+if _lf_path is None:
+    raise FileNotFoundError(
+        "Cannot locate loss_functions.py under any Model Parameters/ "
+        "directory relative to diffusion.py"
+    )
 _lf_spec = importlib.util.spec_from_file_location(
     "loss_functions", os.path.abspath(_lf_path)
 )

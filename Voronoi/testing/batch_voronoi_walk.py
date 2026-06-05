@@ -6,8 +6,8 @@ Saves result_01.png ... result_10.png in Voronoi/voronoi_results_walk/
 using the same 2x2 quiver layout as batch_results/.
 
 Usage:
-    py "Voronoi/batch_voronoi_walk.py"
-    py "Voronoi/batch_voronoi_walk.py" --path_steps 150 --n_runs 10
+    py "Voronoi/testing/batch_voronoi_walk.py"
+    py "Voronoi/testing/batch_voronoi_walk.py" --path_steps 150 --n_runs 10
 """
 
 import argparse
@@ -19,12 +19,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from dataset import OceanCurrentDataset
-from voronoi_model import VoronoiNet
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "DDPM"))
-from repaint_infer import biased_walk_path
+from Voronoi.model.voronoi_model import VoronoiNet
+from paths import biased_walk_path
 
 
 # ---------------------------------------------------------------------------
@@ -34,11 +32,11 @@ from repaint_infer import biased_walk_path
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pickle",      default="data.pickle")
-    p.add_argument("--checkpoint",  default="Voronoi/checkpoints_voronoi_scattered/best_model_scattered.pt")
+    p.add_argument("--checkpoint",  default="Voronoi/models/checkpoints_voronoi_walk/best_model_walk.pt")
     p.add_argument("--n_runs",      type=int,   default=10,  help="number of runs")
     p.add_argument("--path_steps",  type=int,   default=150, help="robot walk length")
     p.add_argument("--base_ch",     type=int,   default=64)
-    p.add_argument("--out_dir",     default="Voronoi/voronoi_results_walk")
+    p.add_argument("--out_dir",     default="Voronoi/results/model_walk_test_walk")
     return p.parse_args()
 
 

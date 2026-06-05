@@ -8,8 +8,8 @@ Output matches the style of visualize_infer.py:
 
 Usage
 -----
-    py "Voronoi/test_voronoi.py"
-    py "Voronoi/test_voronoi.py" --sample 5 --n_sensors 30 --max_samples 10
+    py "Voronoi/testing/test_voronoi.py"
+    py "Voronoi/testing/test_voronoi.py" --sample 5 --n_sensors 30 --max_samples 10
 """
 
 import argparse
@@ -22,9 +22,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from dataset import OceanCurrentDataset
-from voronoi_model import VoronoiNet
+from Voronoi.model.voronoi_model import VoronoiNet
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ from voronoi_model import VoronoiNet
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pickle",      default="data.pickle")
-    p.add_argument("--checkpoint",  default="Voronoi/checkpoints_voronoi_scattered/best_model_scattered.pt")
+    p.add_argument("--checkpoint",  default="Voronoi/models/checkpoints_voronoi_scattered/best_model_scattered.pt")
     p.add_argument("--sample",      type=int,   default=0,    help="Test set index to visualise")
     p.add_argument("--n_sensors",   type=int,   default=50,   help="Number of sparse sensors")
     p.add_argument("--seed",        type=int,   default=42)

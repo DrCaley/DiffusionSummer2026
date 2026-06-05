@@ -83,6 +83,18 @@ All loss functions are defined in `Model Parameters/loss_functions.py`.
 ### GP Baseline (`GP Baseline/`)
 Two independent Gaussian Processes (Matérn ν=2.5 + WhiteKernel), one per velocity component, fit directly to the robot path observations at inference time. No training phase. Mean RMSE on 10 val samples: **0.2011 ± 0.079** — ~75% higher than the DDPM.
 
+### Noise Schedule Ablation (`Model Parameters/NoiseSchedule/`)
+Same DDPM architecture trained under four noise schedules: **linear**, **cosine**, **quadratic**, **sigmoid**. Each is trained independently for 100 epochs and evaluated with the RePaint algorithm. All four share the same inference engine (`repaint_infer.py`). Results stored in `results/model_{schedule}_results/`.
+
+Run all four: `bash "Model Parameters/NoiseSchedule/run_repaint.sh"` from the project root.
+
+### Voronoi Tessellation Baseline (`Voronoi/`)
+Implementation of **VoronoiNet** (Fukami et al., 2021 — *Nature Machine Intelligence*): sparse sensor readings are mapped onto the grid via nearest-neighbour Voronoi tessellation and fed into a U-Net encoder-decoder to reconstruct the full field.
+
+- **Two sensor modes**: scattered (random ocean cells) and walk (biased robot path).
+- Trained independently for each mode; checkpoints in `Voronoi/models/`.
+- Evaluation across all four train/test mode combinations in `Voronoi/results/`.
+
 ---
 
 ## Repository Layout
@@ -90,12 +102,11 @@ Two independent Gaussian Processes (Matérn ν=2.5 + WhiteKernel), one per veloc
 ```
 data.pickle               ← dataset (shared, gitignored)
 dataset.py                ← OceanCurrentDataset (PyTorch Dataset)
-paths.py                  ← robot path generators (biased walk)
+paths.py                  ← robot path generators (biased walk, random walk)
 plot_utils.py             ← quiver-plot helper
 
 DDPM/
   requirements.txt
-  inference_result.png
   model/
     model.py              ← UNet architecture
     diffusion.py          ← DDPM (cosine schedule, q_sample, RePaint)
@@ -107,8 +118,9 @@ DDPM/
     batch_infer.py        ← batch evaluation over N val samples
   models/
     best_model.pt         ← trained checkpoint (gitignored)
-  best_model_results/
-    result_01.png … result_10.png
+  results/
+    best_model_results/
+      result_01.png … result_10.png
 
 GP Baseline/
   gp_infer.py
@@ -119,11 +131,45 @@ GP Baseline/
     result_01.png … result_10.png
 
 Model Parameters/
-  loss_functions.py     ← all auxiliary loss functions (curl_div, spectral, okubo_weiss, wasserstein)
-  Multi-Loss DDPM/
-    diffusion.py          ← backward-compatible alias (imports from DDPM/model/)
-    train.py              ← alternate training entry-point
-    _patch_server.py
+  loss_functions.py       ← all auxiliary loss functions (curl_div, spectral, okubo_weiss, wasserstein)
+  NoiseSchedule/
+    diffusion.py          ← DDPM with pluggable noise schedules (linear/cosine/quadratic/sigmoid)
+    repaint_model.py      ← Repaint UNet (same architecture as DDPM/model/model.py)
+    repaint_infer.py      ← RePaint inference engine (biased walk + repaint loop)
+    train_repaint.py      ← training script  (--schedule cosine|linear|quadratic|sigmoid)
+    test_repaint.py       ← test-set evaluation + 2×2 visualisation
+    batch_repaint.py      ← batch evaluation (10 val samples per schedule)
+    run_repaint.sh        ← bash script to train all four schedules
+    requirements.txt
+    checkpoints/
+      checkpoints_repaint_cosine/
+      checkpoints_repaint_linear/
+      checkpoints_repaint_quadratic/
+      checkpoints_repaint_sigmoid/
+    results/
+      model_comparison.txt
+      model_cosine_results/
+      model_linear_results/
+      model_quadratic_results/
+      model_sigmoid_results/
+
+Voronoi/
+  model/
+    voronoi_model.py      ← VoronoiNet (VoronoiLayer + U-Net encoder-decoder)
+    train_voronoi.py      ← training script (--sensor_mode scattered|walk)
+  testing/
+    test_voronoi.py       ← test-set evaluation + 2×2 visualisation
+    batch_voronoi.py      ← batch evaluation with scattered sensors
+    batch_voronoi_walk.py ← batch evaluation with biased-walk sensors
+  models/
+    checkpoints_voronoi_scattered/  ← checkpoints from scattered-sensor training
+    checkpoints_voronoi_walk/       ← checkpoints from walk-sensor training
+  results/
+    model_comparison.txt
+    model_scattered_test_scattered/
+    model_scattered_test_walk/
+    model_walk_test_scattered/
+    model_walk_test_walk/
 ```
 
 ---
@@ -164,6 +210,40 @@ python testing/batch_infer.py --checkpoint models/best_model.pt \
     --pickle ../data.pickle --n 10 --path_steps 150
 ```
 
+### Noise Schedule Ablation — train all four schedules
+```bash
+bash "Model Parameters/NoiseSchedule/run_repaint.sh"
+# or individually:
+python3 "Model Parameters/NoiseSchedule/train_repaint.py" --schedule cosine --pickle data.pickle
+```
+
+### Noise Schedule — batch evaluation
+```bash
+python3 "Model Parameters/NoiseSchedule/batch_repaint.py" --schedule cosine --pickle data.pickle
+```
+
+### VoronoiNet — training
+```bash
+# scattered sensors (default)
+python "Voronoi/model/train_voronoi.py" --pickle data.pickle --epochs 100
+
+# robot walk sensors
+python "Voronoi/model/train_voronoi.py" --sensor_mode walk --pickle data.pickle \
+    --save_dir Voronoi/models/checkpoints_voronoi_walk
+```
+
+### VoronoiNet — evaluation
+```bash
+# single-sample test visualisation
+python "Voronoi/testing/test_voronoi.py" --pickle data.pickle
+
+# batch evaluation (scattered sensors)
+python "Voronoi/testing/batch_voronoi.py" --pickle data.pickle
+
+# batch evaluation (walk sensors)
+python "Voronoi/testing/batch_voronoi_walk.py" --pickle data.pickle
+```
+
 ---
 
 ## Results Summary
@@ -172,5 +252,8 @@ python testing/batch_infer.py --checkpoint models/best_model.pt \
 |---|---|---|---|
 | DDPM (RePaint, r=10) | **0.1146** | 0.022 | ~3.8% (150-step biased walk) |
 | GP (Matérn 2.5) | 0.2011 | 0.079 | ~3.5% (150-step biased walk) |
+| NoiseSchedule ablation | TBD | TBD | 150-step biased walk |
+| VoronoiNet (scattered) | TBD | TBD | ~50 random ocean sensors |
+| VoronoiNet (walk) | TBD | TBD | ~150-step biased walk |
 
 The DDPM's learned prior enables robust reconstruction even when the robot path misses the high-speed coastal jet — a scenario where the GP degrades to near-zero predictions and RMSE > 0.3.

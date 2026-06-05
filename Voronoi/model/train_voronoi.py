@@ -6,10 +6,10 @@ Reference: Fukami et al. (2021), https://arxiv.org/abs/2101.00554
 
 Usage
 -----
-    py "Voronoi/train_voronoi.py"
-    py "Voronoi/train_voronoi.py" --epochs 200 --batch 32 --n_sensors 50
-    py "Voronoi/train_voronoi.py" --sensor_mode walk --path_steps 150 --save_dir Voronoi/checkpoints_voronoi_walk
-    py "Voronoi/train_voronoi.py" --n_sensors 20 --base_ch 32
+    py "Voronoi/model/train_voronoi.py"
+    py "Voronoi/model/train_voronoi.py" --epochs 200 --batch 32 --n_sensors 50
+    py "Voronoi/model/train_voronoi.py" --sensor_mode walk --path_steps 150 --save_dir Voronoi/models/checkpoints_voronoi_walk
+    py "Voronoi/model/train_voronoi.py" --n_sensors 20 --base_ch 32
 
 Run from the workspace root so that dataset.py is on the Python path.
 """
@@ -22,12 +22,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-# dataset.py lives one level above this script
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# dataset.py and paths.py live at the workspace root (two levels up from Voronoi/model/)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from dataset import OceanCurrentDataset
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "DDPM"))
-from repaint_infer import biased_walk_path
+from paths import biased_walk_path
 
 from voronoi_model import VoronoiNet
 
@@ -52,7 +50,7 @@ def parse_args():
                    help="'scattered' = random points; 'walk' = biased robot path.")
     p.add_argument("--path_steps", type=int,   default=150,
                    help="Robot walk length when --sensor_mode walk.")
-    p.add_argument("--save_dir",  default="Voronoi/checkpoints_voronoi_scattered")
+    p.add_argument("--save_dir",  default="Voronoi/models/checkpoints_voronoi_scattered")
     p.add_argument("--workers",   type=int,   default=0)
     return p.parse_args()
 

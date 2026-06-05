@@ -8,14 +8,13 @@
 diffusionInpaintingVectorFields - try 2/
 ├── data.pickle               ← dataset (shared, stays at root)
 ├── dataset.py                ← dataset loader
-├── paths.py                  ← shared robot path generators
+├── paths.py                  ← shared robot path generators (biased_walk_path, random_walk_path)
 ├── plot_utils.py             ← shared quiver-plot helper
 ├── journal.md
 ├── README.md
-├── vector_field_sample0.png
+├── train_loss_comparison.sh  ← server script to compare loss functions
 ├── DDPM/                     ← DDPM model, training, inference
 │   ├── requirements.txt
-│   ├── inference_result.png
 │   ├── model/
 │   │   ├── diffusion.py      ← DDPM class (all loss modes)
 │   │   ├── model.py          ← UNet architecture
@@ -27,8 +26,9 @@ diffusionInpaintingVectorFields - try 2/
 │   │   └── batch_infer.py        ← batch evaluation
 │   ├── models/
 │   │   └── best_model.pt     ← trained checkpoint (gitignored)
-│   └── best_model_results/
-│       └── result_01.png … result_10.png
+│   └── results/
+│       └── best_model_results/
+│           └── result_01.png … result_10.png
 ├── GP Baseline/              ← GP inpainting baseline
 │   ├── gp_infer.py
 │   ├── visualize_infer.py
@@ -36,12 +36,56 @@ diffusionInpaintingVectorFields - try 2/
 │   ├── requirements.txt
 │   └── GP_results/
 │       └── result_01.png … result_10.png
-└── Model Parameters/         ← shared loss functions
-    └── loss_functions.py     ← curl_div, spectral, okubo_weiss, wasserstein
+├── Model Parameters/         ← shared loss functions + noise schedule ablation
+│   ├── loss_functions.py     ← curl_div, spectral, okubo_weiss, wasserstein
+│   └── NoiseSchedule/        ← noise schedule ablation study
+│       ├── diffusion.py          ← DDPM with pluggable schedule (linear/cosine/quadratic/sigmoid)
+│       ├── repaint_model.py      ← Repaint UNet (same arch as DDPM/model/model.py)
+│       ├── repaint_infer.py      ← RePaint inference (biased walk + repaint loop)
+│       ├── train_repaint.py      ← training script
+│       ├── test_repaint.py       ← test-set evaluation + 2×2 visualisation
+│       ├── batch_repaint.py      ← batch evaluation (10 val samples)
+│       ├── run_repaint.sh        ← bash: train all four schedules
+│       ├── requirements.txt
+│       ├── checkpoints/
+│       │   ├── checkpoints_repaint_cosine/    ← cosine_out.txt + best_model_cosine.pt
+│       │   ├── checkpoints_repaint_linear/    ← linear_out.txt + best_model_linear.pt
+│       │   ├── checkpoints_repaint_quadratic/ ← quadratic_out.txt + best_model_quadratic.pt
+│       │   └── checkpoints_repaint_sigmoid/   ← sigmoid_out.txt + best_model_sigmoid.pt
+│       └── results/
+│           ├── model_comparison.txt
+│           ├── model_cosine_results/
+│           ├── model_linear_results/
+│           ├── model_quadratic_results/
+│           └── model_sigmoid_results/
+└── Voronoi/                  ← Voronoi tessellation baseline (Fukami et al. 2021)
+    ├── model/
+    │   ├── voronoi_model.py      ← VoronoiNet (VoronoiLayer + U-Net)
+    │   └── train_voronoi.py      ← training script (--sensor_mode scattered|walk)
+    ├── testing/
+    │   ├── test_voronoi.py       ← test-set evaluation + 2×2 visualisation
+    │   ├── batch_voronoi.py      ← batch evaluation with scattered sensors
+    │   └── batch_voronoi_walk.py ← batch evaluation with biased-walk sensors
+    ├── models/
+    │   ├── checkpoints_voronoi_scattered/  ← best_model_scattered.pt
+    │   └── checkpoints_voronoi_walk/       ← best_model_walk.pt
+    └── results/
+        ├── model_comparison.txt
+        ├── scattered_out.txt
+        ├── walk_out.txt
+        ├── model_scattered_test_scattered/
+        ├── model_scattered_test_walk/
+        ├── model_walk_test_scattered/
+        └── model_walk_test_walk/
 ```
 
-**Note on paths:** Pass `--pickle` explicitly when running scripts, e.g.
-`python DDPM/model/train.py --pickle data.pickle` from the project root.
+**Note on paths:** All scripts use `sys.path.insert` to add the workspace root to the Python
+path so that `dataset.py` and `paths.py` are importable from any subdirectory. Run all
+scripts from the workspace root, e.g.:
+```
+python "Voronoi/model/train_voronoi.py" --pickle data.pickle
+python "Model Parameters/NoiseSchedule/train_repaint.py" --schedule cosine --pickle data.pickle
+```
 
 ---
 
@@ -343,7 +387,7 @@ The GP mean RMSE is ~75% higher than the DDPM and its variance is ~3.6× larger.
 
 ---
 
-## Structural Loss Integration (June 4–55, 2026)
+## Structural Loss Integration (June 4–5, 2026)
 
 ### Motivation
 
@@ -392,20 +436,152 @@ $$L_\text{total} = L_\text{eps} + \sum_i \lambda_i \cdot L_i$$
 | `okubo_weiss` | $\text{MSE}(W_{\hat{x}_0},\, W_{x_0})$, $W = s_n^2 + s_s^2 - \omega^2$ | 0.001 |
 | `wasserstein` | Sinkhorn–Wasserstein between $|\omega|$ point clouds | 1.0 |
 
-### File layout (current)
-```
-DDPM/model/
-  diffusion.py    ← DDPM class; imports loss_functions.py; default --loss eps
-  train.py        ← --loss, --weights, --sinkhorn_blur args
-Model Parameters/
-  loss_functions.py         ← all auxiliary loss functions
-  Multi-Loss DDPM/
-    diffusion.py            ← thin alias: MultiLossDDPM = DDPM
-    train.py                ← alternate entry-point, same API
-    _patch_server.py
-```
-
 ### Next Steps
 - Train with `--loss spectral` and compare val RMSE against eps-only baseline (0.1146 ± 0.022).
 - Train with `--loss okubo_weiss` and `--loss spectral okubo_weiss` combinations.
 - Consider Wasserstein loss once simpler modes are benchmarked.
+
+---
+
+## Noise Schedule Ablation (June 5, 2026)
+
+### Motivation
+
+The base DDPM uses a **cosine** noise schedule throughout.  Four schedules are now compared
+to understand whether the choice of β_t affects inpainting quality under RePaint:
+
+| Schedule | β_t formula |
+|---|---|
+| `linear`    | linearly from β_min to β_max |
+| `cosine`    | Nichol & Dhariwal 2021 cosine schedule (default) |
+| `quadratic` | quadratic from β_min to β_max |
+| `sigmoid`   | sigmoid-shaped from β_min to β_max |
+
+### Module layout (`Model Parameters/NoiseSchedule/`)
+
+Each schedule trains an **identical Repaint UNet** (same architecture as `DDPM/model/model.py`,
+`base_ch=64`, `time_dim=256`, T=1000) via `train_repaint.py`.
+
+| File | Purpose |
+|---|---|
+| `diffusion.py` | `DDPM` class with `beta_schedule` argument |
+| `repaint_model.py` | `Repaint` UNet (drop-in for DDPM UNet) |
+| `repaint_infer.py` | biased walk path + RePaint inference loop |
+| `train_repaint.py` | training (100 epochs, batch 32, AdamW + cosine LR) |
+| `test_repaint.py` | test-set evaluation + 2×2 single-sample visualisation |
+| `batch_repaint.py` | batch evaluation (10 val samples per schedule) |
+| `run_repaint.sh` | trains all four schedules sequentially |
+
+Checkpoints save to `checkpoints/checkpoints_repaint_{schedule}/best_model_{schedule}.pt`.
+Results save to `results/model_{schedule}_results/`.
+
+### Usage
+```bash
+# train all four (from workspace root)
+bash "Model Parameters/NoiseSchedule/run_repaint.sh"
+
+# evaluate one schedule
+python3 "Model Parameters/NoiseSchedule/batch_repaint.py" --schedule cosine --pickle data.pickle
+```
+
+### Results
+TBD — training not yet run on server.
+
+---
+
+## Voronoi Tessellation Baseline (June 5, 2026)
+
+### Motivation
+
+Implements **VoronoiNet** (Fukami et al., *Nature Machine Intelligence* 2021).  Instead of
+the diffusion-based RePaint pipeline, sparse sensor readings are mapped onto the full
+spatial grid via Voronoi tessellation (nearest-neighbour assignment), and a U-Net
+encoder-decoder reconstructs the full field directly.
+
+This is a **deterministic feed-forward model** (no iterative reverse diffusion), so inference
+is orders of magnitude faster than RePaint but lacks a generative prior over the full field.
+
+### Architecture (`Voronoi/model/voronoi_model.py`)
+
+| Component | Description |
+|---|---|
+| `VoronoiLayer` | Maps K sensor (pos, value) pairs → (C+1, H, W) structured grid via nearest-neighbour; extra channel = binary sensor-presence mask |
+| `VoronoiUNet` | Encoder-decoder UNet, (C+1, H, W) → (C, H, W), no time conditioning |
+| `VoronoiNet` | Convenience wrapper combining both stages; exposes `forward(x0, n_sensors, land_mask)` |
+
+### Sensor modes
+
+| Mode | Description |
+|---|---|
+| `scattered` | K random ocean cells chosen independently per batch (default K=50) |
+| `walk` | K cells from a 150-step biased robot walk (same path as RePaint) |
+
+Training uses a different sensor pattern per batch/epoch to prevent overfitting to a
+fixed sensor layout.
+
+### Module layout (`Voronoi/`)
+
+```
+model/
+  voronoi_model.py        ← VoronoiNet architecture
+  train_voronoi.py        ← training (--sensor_mode scattered|walk)
+testing/
+  test_voronoi.py         ← test-set evaluation + 2×2 visualisation
+  batch_voronoi.py        ← 10-run batch eval, scattered sensors
+  batch_voronoi_walk.py   ← 10-run batch eval, walk sensors
+models/
+  checkpoints_voronoi_scattered/  ← best_model_scattered.pt
+  checkpoints_voronoi_walk/       ← best_model_walk.pt
+results/
+  model_scattered_test_scattered/
+  model_scattered_test_walk/
+  model_walk_test_scattered/
+  model_walk_test_walk/
+```
+
+### Usage
+```bash
+# train (from workspace root)
+python "Voronoi/model/train_voronoi.py" --pickle data.pickle --epochs 100
+python "Voronoi/model/train_voronoi.py" --sensor_mode walk --pickle data.pickle \
+    --save_dir Voronoi/models/checkpoints_voronoi_walk
+
+# evaluate
+python "Voronoi/testing/test_voronoi.py" --pickle data.pickle
+python "Voronoi/testing/batch_voronoi.py" --pickle data.pickle
+python "Voronoi/testing/batch_voronoi_walk.py" --pickle data.pickle
+```
+
+### Results
+TBD — training not yet run on server.
+
+---
+
+## Repository Path Fixes (June 5, 2026)
+
+All Python scripts were updated to correctly add the **workspace root** to `sys.path`
+so that `dataset.py` and `paths.py` are importable from any subdirectory.
+
+| File | Old `sys.path` insert | Fixed insert |
+|---|---|---|
+| `Voronoi/model/train_voronoi.py` | `".."` → `Voronoi/` | `"../.."`  → root |
+| `Voronoi/testing/test_voronoi.py` | `".."` → `Voronoi/` | `"../.."`  → root |
+| `Voronoi/testing/batch_voronoi.py` | `".."` → `Voronoi/` | `"../.."`  → root |
+| `Voronoi/testing/batch_voronoi_walk.py` | `".."` → `Voronoi/` | `"../.."`  → root |
+| `Model Parameters/NoiseSchedule/*.py` | `".."` → `Model Parameters/` | `"../.."`  → root |
+
+Additional fixes applied:
+- `train_voronoi.py`: removed wrong `DDPM`-relative `sys.path` insert; replaced
+  `from repaint_infer import biased_walk_path` → `from paths import biased_walk_path`
+  (the canonical location at root).  Changed `from Voronoi.model.voronoi_model import VoronoiNet`
+  → `from voronoi_model import VoronoiNet` (same-directory import).
+- `batch_voronoi_walk.py`: same `biased_walk_path` fix.
+- Default checkpoint paths updated to use `Voronoi/models/` (matching workspace layout).
+- Default output dirs updated: `Voronoi/results/model_scattered_test_scattered/`,
+  `Voronoi/results/model_walk_test_walk/`.
+- `NoiseSchedule/train_repaint.py`, `test_repaint.py`, `batch_repaint.py`: checkpoint
+  defaults updated to include the `checkpoints/` subdirectory; output dirs updated to
+  include `results/` subdirectory.
+- `run_repaint.sh`: updated script path to `"Model Parameters/NoiseSchedule/train_repaint.py"`,
+  `cd` updated to `/root/ocean_diffusion`, log files routed to checkpoint subdirectories.
+

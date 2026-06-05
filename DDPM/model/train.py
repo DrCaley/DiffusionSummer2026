@@ -44,7 +44,7 @@ def parse_args():
                    help="Per-loss weights, one per non-eps entry in --loss "
                         "(in the same order). Omit to use defaults.")
     p.add_argument("--sinkhorn_blur", type=float, default=0.05)
-    p.add_argument("--save_dir", default="checkpoints")
+    p.add_argument("--save_dir", default="models")
     p.add_argument("--workers",  type=int,   default=0)
     return p.parse_args()
 
@@ -162,7 +162,7 @@ def main():
                 {"epoch": epoch, "model": model.state_dict(),
                  "val_loss": val_total, "val_eps": val_eps,
                  "val_indiv": val_indiv, "args": vars(args)},
-                os.path.join(args.save_dir, f"best_{run_tag}.pt"),
+                os.path.join(args.save_dir, f"model_{run_tag}.pt"),
             )
 
         if epoch % 10 == 0:
