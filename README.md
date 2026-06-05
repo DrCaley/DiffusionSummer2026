@@ -57,26 +57,28 @@ Values are normalised (roughly zero-centred, std ≈ 0.12). The slightly negativ
 
 ## Models
 
-### Basic DDPM (`DDPM/`)
-Baseline unconditional DDPM:
+### DDPM (`DDPM/`)
+Unconditional DDPM with configurable structural regularisation losses:
 - **UNet** with sinusoidal timestep embeddings and ResNet blocks, 14.9 M parameters, input (B, 2, 94, 44) padded internally to (96, 48).
-- **Cosine noise schedule**, T = 1000 steps, epsilon-prediction, MSE loss masked to ocean pixels.
+- **Cosine noise schedule**, T = 1000 steps, epsilon-prediction.
+- **Training loss**: epsilon-MSE (default) plus any combination of auxiliary structural losses, each with its own independent weight λ.
 - **RePaint inference**: robot path observations are blended in at every reverse-diffusion step with r=10 resamplings per timestep.
 
-Best val loss: **0.00327** (epoch 155/200). Mean RMSE on 10 val samples: **0.1146 ± 0.022**.
+Best val loss (eps-only): **0.00327** (epoch 155/200). Mean RMSE on 10 val samples: **0.1146 ± 0.022**.
 
-### Multi-Loss DDPM (`Model Parameters/Multi-Loss DDPM/`)
-Extends the base DDPM with five combinable structural regularisation losses, each with its own independent weight λ:
+#### Loss modes (`--loss`, combinable)
 
-| Loss mode | What it penalises | Default λ |
+All auxiliary losses operate on the denoised reconstruction $\hat{x}_0$ and are masked to ocean pixels.
+
+| `--loss` | What it penalises | Default λ |
 |---|---|---|
-| `eps` | Epsilon-MSE only (baseline) | — |
-| `curl_div` | Curl + divergence of x̂₀ | 0.0002 |
-| `spectral` | FFT power-spectrum difference | 0.0002 |
-| `okubo_weiss` | Okubo-Weiss eddy criterion | 0.001 |
+| `eps` | Epsilon-MSE only — no auxiliary term (default) | — |
+| `curl_div` | MSE between curl and divergence of $\hat{x}_0$ and $x_0$ | 0.0002 |
+| `spectral` | MSE between FFT power spectra | 0.0002 |
+| `okubo_weiss` | MSE between Okubo-Weiss eddy criterion $W = s_n^2 + s_s^2 - \omega^2$ | 0.001 |
 | `wasserstein` | Sinkhorn–Wasserstein distance between vorticity point clouds | 1.0 |
 
-Multiple losses can be combined: `--loss spectral okubo_weiss --weights 0.0002 0.001`.
+All loss functions are defined in `Model Parameters/loss_functions.py`.
 
 ### GP Baseline (`GP Baseline/`)
 Two independent Gaussian Processes (Matérn ν=2.5 + WhiteKernel), one per velocity component, fit directly to the robot path observations at inference time. No training phase. Mean RMSE on 10 val samples: **0.2011 ± 0.079** — ~75% higher than the DDPM.
@@ -117,9 +119,10 @@ GP Baseline/
     result_01.png … result_10.png
 
 Model Parameters/
+  loss_functions.py     ← all auxiliary loss functions (curl_div, spectral, okubo_weiss, wasserstein)
   Multi-Loss DDPM/
-    diffusion.py          ← MultiLossDDPM (5 switchable losses)
-    train.py
+    diffusion.py          ← backward-compatible alias (imports from DDPM/model/)
+    train.py              ← alternate training entry-point
     _patch_server.py
 ```
 
@@ -127,21 +130,24 @@ Model Parameters/
 
 ## Quick Start
 
-### Training (Basic DDPM)
+### Training — epsilon-MSE only (default)
 ```bash
 cd DDPM
 pip install -r requirements.txt
 python model/train.py --epochs 200 --batch 32 --pickle ../data.pickle
 ```
 
-### Training (Multi-Loss DDPM)
+### Training — with structural losses
 ```bash
-cd "Model Parameters/Multi-Loss DDPM"
-# single loss with default weight
-python train.py --loss spectral --pickle ../../data.pickle
+cd DDPM
+# single auxiliary loss
+python model/train.py --loss spectral --pickle ../data.pickle
 
 # multiple losses with explicit weights
-python train.py --loss spectral okubo_weiss --weights 0.0002 0.001 --pickle ../../data.pickle
+python model/train.py --loss spectral okubo_weiss --weights 0.0002 0.001 --pickle ../data.pickle
+
+# all available modes
+python model/train.py --loss curl_div spectral okubo_weiss --pickle ../data.pickle
 ```
 
 ### Inference (Basic DDPM)
