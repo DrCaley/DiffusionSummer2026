@@ -1,9 +1,13 @@
 """
-Training script for the unconditional DDPM on ocean current fields.
+Training script for the DDPM on ocean current fields.
+
+Supports any combination of structural auxiliary losses via --loss.
+Defaults to pure epsilon-MSE (equivalent to the original Basic DDPM).
 
 Usage:
     py train.py
-    py train.py --epochs 200 --batch 64 --base_ch 64 --lr 2e-4
+    py train.py --epochs 200 --loss spectral --weights 0.0002
+    py train.py --loss spectral okubo_weiss --weights 0.0002 0.001
 """
 
 import argparse
@@ -13,7 +17,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset  import OceanCurrentDataset
-from diffusion import DDPM
+from diffusion import DDPM, LOSS_MODES, DEFAULT_WEIGHTS
 from model    import UNet
 
 
@@ -34,6 +38,12 @@ def parse_args():
                    help="Type of noise used in the forward process (default: gaussian)")
     p.add_argument("--schedule",   default="cosine", choices=["cosine", "linear"],
                    help="Noise schedule (default: cosine)")
+    p.add_argument("--loss",    default=["eps"], choices=LOSS_MODES, nargs="+",
+                   help="One or more loss modes (default: eps = plain MSE)")
+    p.add_argument("--weights", type=float, default=None, nargs="+",
+                   help="Per-loss weights, one per non-eps entry in --loss "
+                        "(in the same order). Omit to use defaults.")
+    p.add_argument("--sinkhorn_blur", type=float, default=0.05)
     p.add_argument("--save_dir", default="checkpoints")
     p.add_argument("--workers",  type=int,   default=0)
     return p.parse_args()
@@ -47,6 +57,22 @@ def main():
     args   = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}")
+    print(f"Loss:   {' + '.join(args.loss)}")
+
+    # Build per-loss weights dict
+    aux_losses = [lt for lt in args.loss if lt != "eps"]
+    if args.weights is not None:
+        if len(args.weights) != len(aux_losses):
+            raise ValueError(
+                f"--weights has {len(args.weights)} values but "
+                f"--loss has {len(aux_losses)} non-eps entries."
+            )
+        weights = dict(zip(aux_losses, args.weights))
+    else:
+        weights = {lt: DEFAULT_WEIGHTS.get(lt, 1.0) for lt in aux_losses}
+
+    for lt, w in weights.items():
+        print(f"  \u03bb({lt}) = {w}")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -70,51 +96,72 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
-    diffusion = DDPM(T=args.T, beta_schedule=args.schedule, device=device)
+    diffusion = DDPM(
+        T=args.T,
+        beta_schedule=args.schedule,
+        device=device,
+        loss_types=args.loss,
+        weights=weights,
+        sinkhorn_blur=args.sinkhorn_blur,
+    )
 
     # ---- Optimiser ----
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
-    # ---- Run tag: model_loss_noise_type_schedule ----
-    run_tag = f"ddpm_eps_{args.noise_type}_{args.schedule}"
+    # ---- Run tag: ddpm_{losses}_{noise_type}_{schedule} ----
+    run_tag = f"ddpm_{'+'.join(args.loss)}_{args.noise_type}_{args.schedule}"
 
     # ---- Training loop ----
-    best_val = float("inf")
+    best_val  = float("inf")
 
     for epoch in range(1, args.epochs + 1):
         # -- Train --
         model.train()
-        train_loss = 0.0
+        train_total = train_eps = 0.0
+        train_indiv = {lt: 0.0 for lt in aux_losses}
         for x0 in train_loader:
             x0 = x0.to(device)
-            loss = diffusion.training_loss(model, x0, land_mask)
+            loss, eps_loss, indiv = diffusion.training_loss(model, x0, land_mask)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            train_loss += loss.item()
-        train_loss /= len(train_loader)
+            train_total += loss.item()
+            train_eps   += eps_loss.item()
+            for lt, v in indiv.items():
+                train_indiv[lt] += v.item()
+        n = len(train_loader)
+        train_total /= n;  train_eps /= n
+        for lt in train_indiv: train_indiv[lt] /= n
 
         # -- Validate --
         model.eval()
-        val_loss = 0.0
+        val_total = val_eps = 0.0
+        val_indiv = {lt: 0.0 for lt in aux_losses}
         with torch.no_grad():
             for x0 in val_loader:
                 x0 = x0.to(device)
-                val_loss += diffusion.training_loss(model, x0, land_mask).item()
-        val_loss /= len(val_loader)
+                loss, eps_loss, indiv = diffusion.training_loss(model, x0, land_mask)
+                val_total += loss.item()
+                val_eps   += eps_loss.item()
+                for lt, v in indiv.items():
+                    val_indiv[lt] += v.item()
+        n = len(val_loader)
+        val_total /= n;  val_eps /= n
+        for lt in val_indiv: val_indiv[lt] /= n
 
         scheduler.step()
 
         # -- Checkpoint --
         saved_best = False
-        if val_loss < best_val:
-            best_val = val_loss
+        if val_total < best_val:
+            best_val = val_total
             saved_best = True
             torch.save(
                 {"epoch": epoch, "model": model.state_dict(),
-                 "val_loss": val_loss, "args": vars(args)},
+                 "val_loss": val_total, "val_eps": val_eps,
+                 "val_indiv": val_indiv, "args": vars(args)},
                 os.path.join(args.save_dir, f"best_{run_tag}.pt"),
             )
 
@@ -126,7 +173,15 @@ def main():
 
         if epoch % 10 == 0 or saved_best:
             tag = " *" if saved_best else ""
-            print(f"Epoch {epoch:4d}/{args.epochs} | train={train_loss:.5f} | val={val_loss:.5f}{tag}")
+            aux_str     = "  ".join(f"{lt}={train_indiv[lt]:.5f}" for lt in aux_losses)
+            aux_val_str = "  ".join(f"{lt}={val_indiv[lt]:.5f}"   for lt in aux_losses)
+            aux_part     = f"  {aux_str}"     if aux_str     else ""
+            aux_val_part = f"  {aux_val_str}" if aux_val_str else ""
+            print(
+                f"Epoch {epoch:4d}/{args.epochs} | "
+                f"train={train_total:.5f} (eps={train_eps:.5f}{aux_part}) | "
+                f"val={val_total:.5f}   (eps={val_eps:.5f}{aux_val_part}){tag}"
+            )
 
     print(f"\nTraining complete. Best val loss: {best_val:.5f}")
     print(f"Best checkpoint saved to: {args.save_dir}/best_{run_tag}.pt")

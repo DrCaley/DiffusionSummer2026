@@ -19,16 +19,17 @@ import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-sys.path.append(_ROOT)   # dataset.py
-sys.path.append(os.path.join(_ROOT, "Basic DDPM"))   # model.py
+_ROOT = os.path.dirname(os.path.dirname(_HERE))   # project root
+sys.path.append(_ROOT)                             # dataset.py
+sys.path.append(os.path.join(_ROOT, "DDPM", "model"))  # model.py, diffusion.py
 
 import torch
 from torch.utils.data import DataLoader
 
 from dataset   import OceanCurrentDataset
 from model     import UNet
-from diffusion import MultiLossDDPM, LOSS_MODES
+from diffusion import DDPM, LOSS_MODES, DEFAULT_WEIGHTS
+MultiLossDDPM = DDPM  # alias kept for clarity
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +121,7 @@ def main():
         T=args.T,
         beta_schedule=args.schedule,
         device=device,
-        loss_type=args.loss,
+        loss_types=args.loss,
         weights=weights,
         sinkhorn_blur=args.sinkhorn_blur,
     )

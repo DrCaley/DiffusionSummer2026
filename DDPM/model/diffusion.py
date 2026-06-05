@@ -1,6 +1,25 @@
+import importlib.util
 import math
+import os
+
 import torch
 import torch.nn.functional as F
+
+# ---------------------------------------------------------------------------
+# Load loss_functions.py from Model Parameters/ via importlib so this file
+# can be imported from any working directory.
+# ---------------------------------------------------------------------------
+_lf_path = os.path.join(
+    os.path.dirname(__file__), "..", "..", "Model Parameters", "loss_functions.py"
+)
+_lf_spec = importlib.util.spec_from_file_location(
+    "loss_functions", os.path.abspath(_lf_path)
+)
+_lf_mod = importlib.util.module_from_spec(_lf_spec)
+_lf_spec.loader.exec_module(_lf_mod)
+
+LOSS_MODES    = _lf_mod.LOSS_MODES
+DEFAULT_WEIGHTS = _lf_mod.DEFAULT_WEIGHTS
 
 
 class DDPM:
@@ -8,10 +27,29 @@ class DDPM:
     Denoising Diffusion Probabilistic Model utilities.
 
     Handles the cosine noise schedule, forward process q(x_t | x_0),
-    training loss, and a single reverse step p(x_{t-1} | x_t).
+    training loss (with optional structural regularisation), and a
+    single reverse step p(x_{t-1} | x_t).
+
+    Loss modes (set via loss_types):
+        eps          Pure epsilon-MSE only (default).
+        curl_div     + curl/divergence penalty on reconstructed x̂₀.
+        spectral     + FFT power-spectrum penalty on reconstructed x̂₀.
+        okubo_weiss  + Okubo-Weiss eddy-structure penalty.
+        wasserstein  + Sinkhorn-Wasserstein vorticity distance (needs geomloss).
+
+    Multiple modes can be combined: loss_types=["spectral", "okubo_weiss"].
+    Each has its own independent weight from the weights dict.
     """
 
-    def __init__(self, T: int = 1000, beta_schedule: str = "cosine", device: str = "cpu"):
+    def __init__(
+        self,
+        T:             int                      = 1000,
+        beta_schedule: str                      = "cosine",
+        device:        str                      = "cpu",
+        loss_types:    str | list[str]          = "eps",
+        weights:       dict[str, float] | None  = None,
+        sinkhorn_blur: float                    = 0.05,
+    ):
         self.T      = T
         self.device = device
 
@@ -28,6 +66,36 @@ class DDPM:
         )
         self.sqrt_ab      = self.alpha_bar.sqrt()
         self.sqrt_one_mab = (1.0 - self.alpha_bar).sqrt()
+
+        # --- Loss configuration ---
+        if isinstance(loss_types, str):
+            loss_types = [loss_types]
+        for lt in loss_types:
+            if lt not in LOSS_MODES:
+                raise ValueError(f"loss_types must be from {LOSS_MODES}, got '{lt}'")
+        self.loss_types = loss_types
+
+        # Per-loss weights: start from defaults, then apply any overrides
+        self.weights: dict[str, float] = {
+            lt: DEFAULT_WEIGHTS.get(lt, 1.0) for lt in loss_types if lt != "eps"
+        }
+        if weights is not None:
+            self.weights.update(weights)
+
+        # Lazy-load geomloss only when wasserstein is requested
+        self._sinkhorn = None
+        if "wasserstein" in self.loss_types:
+            try:
+                from geomloss import SamplesLoss
+                self._sinkhorn = SamplesLoss(
+                    loss="sinkhorn", p=1, blur=sinkhorn_blur,
+                    scaling=0.5, backend="tensorized",
+                )
+            except ImportError as e:
+                raise ImportError(
+                    "loss_types='wasserstein' requires geomloss.  "
+                    "Install it with: pip install geomloss"
+                ) from e
 
     # ------------------------------------------------------------------
     # Noise schedule
@@ -67,24 +135,56 @@ class DDPM:
         model:     torch.nn.Module,
         x0:        torch.Tensor,
         land_mask: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
         """
-        Simple epsilon-prediction MSE loss, computed only on ocean pixels.
+        Epsilon-prediction MSE loss plus any active auxiliary structural losses.
 
         Args:
             model:     UNet that predicts noise
             x0:        (B, 2, H, W) clean fields
             land_mask: (H, W) bool, True = land (excluded from loss)
+
+        Returns:
+            (total, eps_loss, indiv)
+            total:    scalar loss used for backprop
+            eps_loss: the epsilon-MSE component alone
+            indiv:    dict of {loss_name: unweighted_value} for each aux loss
+                      (empty dict when loss_types == ["eps"])
         """
         B = x0.shape[0]
         t = torch.randint(0, self.T, (B,), device=self.device)
         xt, noise = self.q_sample(x0, t)
         pred_noise = model(xt, t)
 
-        # Ocean mask broadcast to (1, 1, H, W)
-        ocean = (~land_mask).float()[None, None]
-        loss = F.mse_loss(pred_noise * ocean, noise * ocean)
-        return loss
+        ocean = (~land_mask).float()[None, None]   # (1, 1, H, W)
+        eps_loss = F.mse_loss(pred_noise * ocean, noise * ocean)
+
+        if self.loss_types == ["eps"]:
+            return eps_loss, eps_loss, {}
+
+        # Reconstruct x̂₀
+        sqrt_ab  = self.sqrt_ab[t][:, None, None, None]
+        sqrt_mab = self.sqrt_one_mab[t][:, None, None, None]
+        x0_pred  = (xt - sqrt_mab * pred_noise) / sqrt_ab.clamp(min=1e-8)
+
+        # Compute each active auxiliary loss
+        indiv: dict[str, torch.Tensor] = {}
+        for lt in self.loss_types:
+            if lt == "eps":
+                continue
+            elif lt == "curl_div":
+                indiv[lt] = _lf_mod.curl_div_loss(x0_pred, x0, ocean)
+            elif lt == "spectral":
+                indiv[lt] = _lf_mod.spectral_loss(x0_pred, x0, ocean)
+            elif lt == "okubo_weiss":
+                indiv[lt] = _lf_mod.okubo_weiss_loss(x0_pred, x0, ocean)
+            elif lt == "wasserstein":
+                indiv[lt] = _lf_mod.wasserstein_loss(
+                    x0_pred, x0, ocean, self._sinkhorn
+                )
+
+        total = eps_loss + sum(self.weights[lt] * v for lt, v in indiv.items())
+        return total, eps_loss, indiv
 
     # ------------------------------------------------------------------
     # Single reverse step  p(x_{t-1} | x_t)
