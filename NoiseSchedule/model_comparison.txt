@@ -1,0 +1,69 @@
+NoiseSchedule RePaint Model Comparison
+=======================================
+Date: June 5, 2026
+
+Architecture: RePaint UNet (same backbone across all schedules), 94x44 grid
+Dataset: Ocean current fields (u, v), validation set (10 samples)
+Inference: RePaint algorithm, r=10 resampling, 150-step biased walk path, T=1000
+
+-----------------------------------------------------------------------
+Model A: Linear noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_linear/best_model_linear.pt
+  Best epoch: 100
+  Results folder: NoiseSchedule/model_linear_results/
+
+  Run RMSEs: 0.1466, 0.1984, 0.1822, 0.0834, 0.1620,
+             0.5267, 0.1196, 0.1453, 0.1931, 0.6395
+  Mean RMSE : 0.2397   Std: 0.1766
+
+-----------------------------------------------------------------------
+Model B: Cosine noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_cosine/best_model_cosine.pt
+  Best epoch: 100
+  Results folder: NoiseSchedule/model_cosine_results/
+
+  Run RMSEs: 0.0845, 0.2156, 0.2307, 0.1914, 0.0954,
+             0.2764, 0.1164, 0.1699, 0.1487, 0.1630
+  Mean RMSE : 0.1692   Std: 0.0581
+
+-----------------------------------------------------------------------
+Model C: Quadratic noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_quadratic/best_model_quadratic.pt
+  Best epoch: 89
+  Results folder: NoiseSchedule/model_quadratic_results/
+
+  Run RMSEs: 0.1128, 0.0838, 0.1784, 0.1055, 0.1545,
+             0.0974, 0.0632, 0.1416, 0.1121, 0.0976
+  Mean RMSE : 0.1147   Std: 0.0326
+
+-----------------------------------------------------------------------
+Model D: Sigmoid noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_sigmoid/best_model_sigmoid.pt
+  Best epoch: 90
+  Results folder: NoiseSchedule/model_sigmoid_results/
+
+  Run RMSEs: 0.1316, 0.1899, 0.1918, 0.0677, 0.1534,
+             0.2528, 0.1183, 0.1052, 0.0488, 0.0979
+  Mean RMSE : 0.1357   Std: 0.0591
+
+-----------------------------------------------------------------------
+Summary Table (Mean RMSE, lower is better):
+
+  Schedule  | Mean RMSE | Std    | Best epoch |
+  ----------|-----------|--------|------------|
+  Linear    |  0.2397   | 0.1766 |    100     |
+  Cosine    |  0.1692   | 0.0581 |    100     |
+  Sigmoid   |  0.1357   | 0.0591 |     90     |
+  Quadratic |  0.1147   | 0.0326 |     89     |
+  ----------|-----------|--------|------------|
+
+Key observations:
+- Quadratic schedule achieves the best mean RMSE (0.1147) and lowest variance (Std=0.0326),
+  indicating the most consistent and accurate reconstructions
+- Sigmoid is a close second (0.1357) with similar variance to cosine
+- Cosine is mid-tier (0.1692); competitive on most samples but occasionally high error
+- Linear performs worst overall (0.2397) with very high variance (Std=0.1766), driven by
+  two outlier runs (result_06: 0.5267, result_10: 0.6395) suggesting poor generalisation
+  on harder samples under a linear schedule
+- The non-linear schedules (cosine, quadratic, sigmoid) all significantly outperform linear,
+  consistent with the literature on improved noise schedule design for diffusion models

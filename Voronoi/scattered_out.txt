@@ -1,0 +1,37 @@
+Device: cpu
+Test set size: 1965 samples
+Loaded checkpoint (epoch 93)
+
+[Run 1/10]  test sample=0, seed=1
+  Saved: Voronoi/model_walk_test_scattered\result_01.png  (RMSE=0.0633)
+
+[Run 2/10]  test sample=1, seed=8
+  Saved: Voronoi/model_walk_test_scattered\result_02.png  (RMSE=0.0531)
+
+[Run 3/10]  test sample=2, seed=15
+  Saved: Voronoi/model_walk_test_scattered\result_03.png  (RMSE=0.0474)
+
+[Run 4/10]  test sample=3, seed=22
+  Saved: Voronoi/model_walk_test_scattered\result_04.png  (RMSE=0.0423)
+
+[Run 5/10]  test sample=4, seed=29
+  Saved: Voronoi/model_walk_test_scattered\result_05.png  (RMSE=0.0429)
+
+[Run 6/10]  test sample=5, seed=36
+  Saved: Voronoi/model_walk_test_scattered\result_06.png  (RMSE=0.0666)
+
+[Run 7/10]  test sample=6, seed=43
+  Saved: Voronoi/model_walk_test_scattered\result_07.png  (RMSE=0.0830)
+
+[Run 8/10]  test sample=7, seed=50
+  Saved: Voronoi/model_walk_test_scattered\result_08.png  (RMSE=0.0950)
+
+[Run 9/10]  test sample=8, seed=57
+  Saved: Voronoi/model_walk_test_scattered\result_09.png  (RMSE=0.0983)
+
+[Run 10/10]  test sample=9, seed=64
+  Saved: Voronoi/model_walk_test_scattered\result_10.png  (RMSE=0.0911)
+
+All done.
+RMSE per run : ['0.0633', '0.0531', '0.0474', '0.0423', '0.0429', '0.0666', '0.0830', '0.0950', '0.0983', '0.0911']
+Mean RMSE    : 0.0683  Std: 0.0209

@@ -1,0 +1,38 @@
+Device: cpu
+Test set size: 1965 samples
+Loaded checkpoint (epoch 93)
+Path steps: 150
+
+[Run 1/10]  test sample=0, seed=1
+  Saved: Voronoi/model_walk_test_walk\result_01.png  (RMSE=0.0452, path_cells=143)
+
+[Run 2/10]  test sample=1, seed=8
+  Saved: Voronoi/model_walk_test_walk\result_02.png  (RMSE=0.0432, path_cells=139)
+
+[Run 3/10]  test sample=2, seed=15
+  Saved: Voronoi/model_walk_test_walk\result_03.png  (RMSE=0.0538, path_cells=113)
+
+[Run 4/10]  test sample=3, seed=22
+  Saved: Voronoi/model_walk_test_walk\result_04.png  (RMSE=0.0387, path_cells=144)
+
+[Run 5/10]  test sample=4, seed=29
+  Saved: Voronoi/model_walk_test_walk\result_05.png  (RMSE=0.0419, path_cells=128)
+
+[Run 6/10]  test sample=5, seed=36
+  Saved: Voronoi/model_walk_test_walk\result_06.png  (RMSE=0.0375, path_cells=124)
+
+[Run 7/10]  test sample=6, seed=43
+  Saved: Voronoi/model_walk_test_walk\result_07.png  (RMSE=0.0455, path_cells=146)
+
+[Run 8/10]  test sample=7, seed=50
+  Saved: Voronoi/model_walk_test_walk\result_08.png  (RMSE=0.0665, path_cells=139)
+
+[Run 9/10]  test sample=8, seed=57
+  Saved: Voronoi/model_walk_test_walk\result_09.png  (RMSE=0.0386, path_cells=148)
+
+[Run 10/10]  test sample=9, seed=64
+  Saved: Voronoi/model_walk_test_walk\result_10.png  (RMSE=0.0768, path_cells=145)
+
+All done.
+RMSE per run : ['0.0452', '0.0432', '0.0538', '0.0387', '0.0419', '0.0375', '0.0455', '0.0665', '0.0386', '0.0768']
+Mean RMSE    : 0.0488  Std: 0.0125

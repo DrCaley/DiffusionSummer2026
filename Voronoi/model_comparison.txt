@@ -1,0 +1,57 @@
+Voronoi Model Comparison
+========================
+Date: June 4, 2026
+
+Architecture: VoronoiNet (13,923,144 params), U-Net backbone, 94x44 grid
+Dataset: Ocean current fields (u, v), 1965 test samples
+Sensors: 50 scattered points OR 150-step biased walk path
+
+-----------------------------------------------------------------------
+Model A: Trained on SCATTERED sensor data
+  Checkpoint: Voronoi/checkpoints_voronoi_scattered/best_model.pt
+  Best epoch: 95
+  Results folder (scattered test):  Voronoi/model_scattered_test_scattered/
+  Results folder (walk test):        Voronoi/model_scattered_test_walk/
+
+  Tested with SCATTERED sensors:
+    Run RMSEs: 0.0177, 0.0205, 0.0165, 0.0159, 0.0167,
+               0.0140, 0.0224, 0.0265, (0.0~), (0.0~)
+    Mean RMSE: ~0.018
+
+  Tested with WALK PATH sensors:
+    Run RMSEs: 0.0707, 0.0877, 0.0845, 0.0514, 0.0628,
+               0.1105, 0.0542, 0.1120, (~),    (~)
+    Mean RMSE: ~0.089
+
+-----------------------------------------------------------------------
+Model B: Trained on WALK PATH sensor data
+  Checkpoint: Voronoi/checkpoints_voronoi_walk/best_model_walk.pt
+  Best epoch: 93
+  Results folder (walk test):        Voronoi/model_walk_test_walk/
+  Results folder (scattered test):   Voronoi/model_walk_test_scattered/
+
+  Tested with WALK PATH sensors:
+    Run RMSEs: 0.0452, 0.0432, 0.0538, 0.0387, 0.0419,
+               0.0375, 0.0455, 0.0665, 0.0386, 0.0768
+    Mean RMSE: 0.0488  Std: 0.0125
+
+  Tested with SCATTERED sensors:
+    Run RMSEs: 0.0633, 0.0531, 0.0474, 0.0423, 0.0429,
+               0.0666, 0.0830, 0.0950, 0.0983, 0.0911
+    Mean RMSE: 0.0683  Std: 0.0209
+
+-----------------------------------------------------------------------
+Summary Table (Mean RMSE):
+
+                        | Scattered Sensors | Walk Path Sensors |
+  ----------------------|-------------------|-------------------|
+  Scattered-trained (A) |     0.018         |     ~0.089        |
+  Walk-trained (B)      |     0.0683        |     0.0488        |
+  ----------------------|-------------------|-------------------|
+
+Key observations:
+- Model A excels on its native input (scattered) but degrades badly on walk paths
+- Model B (epoch 93) outperforms Model A on walk path inputs (0.0488 vs ~0.089)
+- Model B generalises less well to scattered sensors (0.0683 vs 0.018) — expected
+  due to distribution mismatch; walk paths produce spatially clustered Voronoi inputs
+  that are very different from uniform scattered coverage
