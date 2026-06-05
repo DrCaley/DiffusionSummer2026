@@ -57,7 +57,7 @@ Values are normalised (roughly zero-centred, std ≈ 0.12). The slightly negativ
 
 ## Models
 
-### Basic DDPM (`Basic DDPM/`)
+### Basic DDPM (`DDPM/`)
 Baseline unconditional DDPM:
 - **UNet** with sinusoidal timestep embeddings and ResNet blocks, 14.9 M parameters, input (B, 2, 94, 44) padded internally to (96, 48).
 - **Cosine noise schedule**, T = 1000 steps, epsilon-prediction, MSE loss masked to ocean pixels.
@@ -65,11 +65,63 @@ Baseline unconditional DDPM:
 
 Best val loss: **0.00327** (epoch 155/200). Mean RMSE on 10 val samples: **0.1146 ± 0.022**.
 
+### Multi-Loss DDPM (`Model Parameters/Multi-Loss DDPM/`)
+Extends the base DDPM with five combinable structural regularisation losses, each with its own independent weight λ:
+
+| Loss mode | What it penalises | Default λ |
+|---|---|---|
+| `eps` | Epsilon-MSE only (baseline) | — |
+| `curl_div` | Curl + divergence of x̂₀ | 0.0002 |
+| `spectral` | FFT power-spectrum difference | 0.0002 |
+| `okubo_weiss` | Okubo-Weiss eddy criterion | 0.001 |
+| `wasserstein` | Sinkhorn–Wasserstein distance between vorticity point clouds | 1.0 |
+
+Multiple losses can be combined: `--loss spectral okubo_weiss --weights 0.0002 0.001`.
 
 ### GP Baseline (`GP Baseline/`)
 Two independent Gaussian Processes (Matérn ν=2.5 + WhiteKernel), one per velocity component, fit directly to the robot path observations at inference time. No training phase. Mean RMSE on 10 val samples: **0.2011 ± 0.079** — ~75% higher than the DDPM.
 
 ---
+
+## Repository Layout
+
+```
+data.pickle               ← dataset (shared, gitignored)
+dataset.py                ← OceanCurrentDataset (PyTorch Dataset)
+paths.py                  ← robot path generators (biased walk)
+plot_utils.py             ← quiver-plot helper
+
+DDPM/
+  requirements.txt
+  inference_result.png
+  model/
+    model.py              ← UNet architecture
+    diffusion.py          ← DDPM (cosine schedule, q_sample, RePaint)
+    train.py              ← training script
+  testing/
+    repaint/
+      repaint_infer.py    ← RePaint inference engine
+    visualize_infer.py    ← single-sample inference + 2×2 figure
+    batch_infer.py        ← batch evaluation over N val samples
+  models/
+    best_model.pt         ← trained checkpoint (gitignored)
+  best_model_results/
+    result_01.png … result_10.png
+
+GP Baseline/
+  gp_infer.py
+  visualize_infer.py
+  batch_infer.py
+  requirements.txt
+  GP_results/
+    result_01.png … result_10.png
+
+Model Parameters/
+  Multi-Loss DDPM/
+    diffusion.py          ← MultiLossDDPM (5 switchable losses)
+    train.py
+    _patch_server.py
+```
 
 ---
 
@@ -77,21 +129,32 @@ Two independent Gaussian Processes (Matérn ν=2.5 + WhiteKernel), one per veloc
 
 ### Training (Basic DDPM)
 ```bash
-cd "Basic DDPM"
+cd DDPM
 pip install -r requirements.txt
-python train.py --epochs 200 --batch 32 --pickle ../data.pickle
+python model/train.py --epochs 200 --batch 32 --pickle ../data.pickle
+```
+
+### Training (Multi-Loss DDPM)
+```bash
+cd "Model Parameters/Multi-Loss DDPM"
+# single loss with default weight
+python train.py --loss spectral --pickle ../../data.pickle
+
+# multiple losses with explicit weights
+python train.py --loss spectral okubo_weiss --weights 0.0002 0.001 --pickle ../../data.pickle
 ```
 
 ### Inference (Basic DDPM)
 ```bash
-cd "Basic DDPM"
-python visualize_infer.py --checkpoint checkpoints/best_model.pt \
+cd DDPM
+python testing/visualize_infer.py --checkpoint models/best_model.pt \
     --pickle ../data.pickle --sample 0 --path_steps 150 --resample 10
 ```
 
 ### Batch Evaluation
 ```bash
-python batch_infer.py --checkpoint checkpoints/best_model.pt \
+cd DDPM
+python testing/batch_infer.py --checkpoint models/best_model.pt \
     --pickle ../data.pickle --n 10 --path_steps 150
 ```
 

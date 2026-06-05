@@ -107,7 +107,7 @@ def biased_walk_path(
             elif dot == 0:  # perpendicular
                 w = side
             else:           # reverse — strongly discouraged
-                w = side * 0.05
+                w = side * 0.001
 
             # Exploration bonus: scale down weight if neighbour already visited
             nr, nc = r + dr, c + dc
