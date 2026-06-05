@@ -2,7 +2,7 @@
 
 ---
 
-## Workspace Structure (as of June 4, 2026)
+## Workspace Structure (as of June 5, 2026)
 
 ```
 diffusionInpaintingVectorFields - try 2/
@@ -11,32 +11,37 @@ diffusionInpaintingVectorFields - try 2/
 ├── paths.py                  ← shared robot path generators
 ├── plot_utils.py             ← shared quiver-plot helper
 ├── journal.md
+├── README.md
 ├── vector_field_sample0.png
-└── Basic DDPM/               ← DDPM model/inference code
-    ├── model.py
-    ├── diffusion.py
-    ├── train.py
-    ├── repaint_infer.py
-    ├── visualize_infer.py
-    ├── batch_infer.py
-    ├── requirements.txt
-    ├── inference_result.png
-    ├── checkpoints/
-    │   └── best_model.pt
-    └── batch_results/
-        └── result_01.png … result_10.png
-└── GP Baseline/              ← GP inpainting baseline
-    ├── gp_infer.py
-    ├── visualize_infer.py
-    ├── batch_infer.py
-    ├── requirements.txt
-    └── batch_results/
-        └── result_01.png … result_10.png
+├── DDPM/                     ← DDPM model, training, inference
+│   ├── requirements.txt
+│   ├── inference_result.png
+│   ├── model/
+│   │   ├── diffusion.py      ← DDPM class (all loss modes)
+│   │   ├── model.py          ← UNet architecture
+│   │   └── train.py          ← training script (--loss, --weights)
+│   ├── testing/
+│   │   ├── repaint/
+│   │   │   └── repaint_infer.py  ← RePaint inference engine
+│   │   ├── visualize_infer.py    ← single-sample inference + figure
+│   │   └── batch_infer.py        ← batch evaluation
+│   ├── models/
+│   │   └── best_model.pt     ← trained checkpoint (gitignored)
+│   └── best_model_results/
+│       └── result_01.png … result_10.png
+├── GP Baseline/              ← GP inpainting baseline
+│   ├── gp_infer.py
+│   ├── visualize_infer.py
+│   ├── batch_infer.py
+│   ├── requirements.txt
+│   └── GP_results/
+│       └── result_01.png … result_10.png
+└── Model Parameters/         ← shared loss functions
+    └── loss_functions.py     ← curl_div, spectral, okubo_weiss, wasserstein
 ```
 
-**Note on paths:** The Python scripts default to `data.pickle` (same directory).
-On the remote server (`~/ocean_diffusion/`) everything is flat so defaults work.
-If running locally from `Basic DDPM/`, pass `--pickle ../data.pickle`.
+**Note on paths:** Pass `--pickle` explicitly when running scripts, e.g.
+`python DDPM/model/train.py --pickle data.pickle` from the project root.
 
 ---
 
