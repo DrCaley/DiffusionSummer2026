@@ -34,7 +34,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pickle",      default="data.pickle")
     p.add_argument("--schedule",    default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid"])
+                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"])
     p.add_argument("--checkpoint",  default=None,
                    help="Path to checkpoint. Defaults to "
                         "checkpoints_repaint_{schedule}/best_model_{schedule}.pt")

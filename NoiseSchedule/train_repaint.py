@@ -41,7 +41,7 @@ def parse_args():
     p.add_argument("--time_dim", type=int,   default=256)
     p.add_argument("--T",        type=int,   default=1000)
     p.add_argument("--schedule", default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid"],
+                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"],
                    help="Noise schedule to use for training.")
     p.add_argument("--save_dir", default=None,
                    help="Checkpoint directory. Defaults to "

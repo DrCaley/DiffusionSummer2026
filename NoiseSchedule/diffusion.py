@@ -7,11 +7,12 @@ class DDPM:
     """
     Denoising Diffusion Probabilistic Model utilities.
 
-    Supports four named noise schedules:
+    Supports five named noise schedules:
         "linear"    - linearly spaced betas from 1e-4 to 0.02
         "cosine"    - cosine schedule (Nichol & Dhariwal 2021)
         "quadratic" - quadratically spaced betas (sqrt-linear then squared)
         "sigmoid"   - sigmoid-shaped betas rescaled to [1e-4, 0.02]
+        "geometric" - geometrically spaced betas (exponential, Kingma et al. 2021)
     """
 
     def __init__(self, T: int = 1000, beta_schedule: str = "cosine", device: str = "cpu"):
@@ -27,10 +28,15 @@ class DDPM:
         elif beta_schedule == "sigmoid":
             betas = torch.sigmoid(torch.linspace(-6, 6, T))
             betas = betas * (0.02 - 1e-4) + 1e-4
+        elif beta_schedule == "geometric":
+            beta_min = 1e-4
+            beta_max = 0.02
+            r = (beta_max / beta_min) ** (1.0 / (T - 1))
+            betas = beta_min * (r ** torch.arange(T, dtype=torch.float64)).float()
         else:
             raise ValueError(
                 f"Unknown beta_schedule: {beta_schedule!r}. "
-                f"Choose from 'linear', 'cosine', 'quadratic', 'sigmoid'."
+                f"Choose from 'linear', 'cosine', 'quadratic', 'sigmoid', 'geometric'."
             )
 
         self.betas    = betas.to(device)

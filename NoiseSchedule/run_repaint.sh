@@ -4,7 +4,7 @@
 # Mirrors run_voronoi.sh — logs go to NoiseSchedule/{schedule}_out.txt
 cd /root
 
-for SCHED in linear cosine quadratic sigmoid; do
+for SCHED in linear cosine quadratic sigmoid geometric; do
     echo "========================================"
     echo "=== Training schedule: $SCHED ==="
     echo "========================================"
