@@ -48,13 +48,16 @@ class DDPM:
 
     Loss modes (set via loss_types):
         eps          Pure epsilon-MSE only (default).
-        curl_div     + curl/divergence penalty on reconstructed x̂₀.
-        spectral     + FFT power-spectrum penalty on reconstructed x̂₀.
-        okubo_weiss  + Okubo-Weiss eddy-structure penalty.
-        wasserstein  + Sinkhorn-Wasserstein vorticity distance (needs geomloss).
+        curl_div     curl/divergence penalty on reconstructed x̂₀.
+        spectral     FFT power-spectrum penalty on reconstructed x̂₀.
+        okubo_weiss  Okubo-Weiss eddy-structure penalty.
+        wasserstein  Sinkhorn-Wasserstein vorticity distance (needs geomloss).
+        stream_function  stream-function (Poisson-solve) penalty.
+        strain_rate  strain-rate tensor invariants penalty.
 
     Multiple modes can be combined: loss_types=["spectral", "okubo_weiss"].
-    Each has its own independent weight from the weights dict.
+    Omitting "eps" trains with *only* the auxiliary losses (no MSE term).
+    Each auxiliary loss has its own independent weight from the weights dict.
     """
 
     def __init__(
@@ -198,8 +201,14 @@ class DDPM:
                 indiv[lt] = _lf_mod.wasserstein_loss(
                     x0_pred, x0, ocean, self._sinkhorn
                 )
+            elif lt == "stream_function":
+                indiv[lt] = _lf_mod.stream_function_loss(x0_pred, x0, ocean)
+            elif lt == "strain_rate":
+                indiv[lt] = _lf_mod.strain_rate_loss(x0_pred, x0, ocean)
 
-        total = eps_loss + sum(self.weights[lt] * v for lt, v in indiv.items())
+        aux_total = sum(self.weights[lt] * v for lt, v in indiv.items())
+        # Only add epsilon-MSE when "eps" is explicitly listed
+        total = (eps_loss + aux_total) if "eps" in self.loss_types else aux_total
         return total, eps_loss, indiv
 
     # ------------------------------------------------------------------

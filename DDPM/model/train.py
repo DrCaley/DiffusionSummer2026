@@ -165,12 +165,6 @@ def main():
                 os.path.join(args.save_dir, f"model_{run_tag}.pt"),
             )
 
-        if epoch % 10 == 0:
-            torch.save(
-                {"epoch": epoch, "model": model.state_dict(), "args": vars(args)},
-                os.path.join(args.save_dir, f"ckpt_ep{epoch:04d}_{run_tag}.pt"),
-            )
-
         if epoch % 10 == 0 or saved_best:
             tag = " *" if saved_best else ""
             aux_str     = "  ".join(f"{lt}={train_indiv[lt]:.5f}" for lt in aux_losses)

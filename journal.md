@@ -2,7 +2,7 @@
 
 ---
 
-## Workspace Structure (as of June 5, 2026)
+## Workspace Structure (as of June 10, 2026)
 
 ```
 diffusionInpaintingVectorFields - try 2/
@@ -13,6 +13,7 @@ diffusionInpaintingVectorFields - try 2/
 ├── journal.md
 ├── README.md
 ├── train_loss_comparison.sh  ← server script to compare loss functions
+├── vector_field_sample0.png  ← sample visualisation
 ├── DDPM/                     ← DDPM model, training, inference
 │   ├── requirements.txt
 │   ├── model/
@@ -25,8 +26,14 @@ diffusionInpaintingVectorFields - try 2/
 │   │   ├── visualize_infer.py    ← single-sample inference + figure
 │   │   └── batch_infer.py        ← batch evaluation
 │   ├── models/
-│   │   └── best_model.pt     ← trained checkpoint (gitignored)
+│   │   ├── best_model.pt                              ← eps-only baseline (cosine schedule)
+│   │   ├── model_ddpm_curl_div_gaussian_cosine1.pt
+│   │   ├── model_ddpm_eps_gaussian_cosine1.pt
+│   │   ├── model_ddpm_okubo_weiss_gaussian_cosine1.pt
+│   │   ├── model_ddpm_spectral_gaussian_cosine1.pt
+│   │   └── model_ddpm_wasserstein_gaussian_cosine1.pt
 │   └── results/
+│       ├── inference_result.png
 │       └── best_model_results/
 │           └── result_01.png … result_10.png
 ├── GP Baseline/              ← GP inpainting baseline
@@ -35,9 +42,38 @@ diffusionInpaintingVectorFields - try 2/
 │   ├── batch_infer.py
 │   ├── requirements.txt
 │   └── GP_results/
+│       ├── gp_result.png
 │       └── result_01.png … result_10.png
-├── Model Parameters/         ← shared loss functions + noise schedule ablation
-│   ├── loss_functions.py     ← curl_div, spectral, okubo_weiss, wasserstein
+├── Model Parameters/
+│   ├── Loss Function/        ← loss function ablation study
+│   │   ├── loss_functions.py         ← curl_div, spectral, okubo_weiss, wasserstein, stream_fn, strain_rate
+│   │   ├── batch_eval_loss.py        ← Run 1 eval: 7 models × 10 val samples, 7 metrics
+│   │   ├── batch_eval_v2.py          ← Run 2 eval: 6 models × 10 val samples, 3 metrics
+│   │   ├── batch_eval_loss_visual.py ← (legacy visual batch eval)
+│   │   ├── loss_eval_visual.py       ← variance eval: 7 models × 50 samples × 10 seeds
+│   │   ├── train_loss_comparison.sh  ← server training script
+│   │   ├── train_new_losses.sh       ← server script for additional loss variants
+│   │   ├── models/
+│   │   │   ├── model_ddpm_curl_div_gaussian_cosine.pt
+│   │   │   ├── model_ddpm_eps_gaussian_cosine.pt
+│   │   │   ├── model_ddpm_okubo_weiss_gaussian_cosine.pt
+│   │   │   ├── model_ddpm_spectral_gaussian_cosine.pt
+│   │   │   ├── model_ddpm_strain_rate_gaussian_cosine.pt
+│   │   │   ├── model_ddpm_stream_function_gaussian_cosine.pt
+│   │   │   └── model_ddpm_wasserstein_gaussian_cosine.pt
+│   │   └── results/
+│   │       ├── eval_loss/                  ← Run 1 results (seed 42, 7 models)
+│   │       │   ├── loss_eval_visual_report.txt
+│   │       │   ├── loss_eval_visual_results.csv
+│   │       │   ├── loss_eval_visual_summary.csv
+│   │       │   └── sample_0168.png … sample_1683.png  (10 PNGs)
+│   │       ├── eval_run2/                  ← Run 2 results (seed 99, 6 models)
+│   │       │   ├── report.txt
+│   │       │   ├── results.csv
+│   │       │   ├── summary.csv
+│   │       │   └── sample_0348.png … sample_1908.png  (10 PNGs)
+│   │       └── eval_variance_loss/         ← variance/mean PNGs (16/50 downloaded)
+│   │           └── sample_124.png … sample_831.png  (16 PNGs)
 │   └── NoiseSchedule/        ← noise schedule ablation study
 │       ├── diffusion.py          ← DDPM with pluggable schedule (linear/cosine/quadratic/sigmoid)
 │       ├── repaint_model.py      ← Repaint UNet (same arch as DDPM/model/model.py)
@@ -45,6 +81,9 @@ diffusionInpaintingVectorFields - try 2/
 │       ├── train_repaint.py      ← training script
 │       ├── test_repaint.py       ← test-set evaluation + 2×2 visualisation
 │       ├── batch_repaint.py      ← batch evaluation (10 val samples)
+│       ├── batch_eval.py         ← batch evaluation script
+│       ├── batch_eval_visual.py  ← visual batch evaluation
+│       ├── multi_run_grid.py     ← multi-run grid comparison
 │       ├── run_repaint.sh        ← bash: train all four schedules
 │       ├── requirements.txt
 │       ├── checkpoints/
@@ -54,10 +93,21 @@ diffusionInpaintingVectorFields - try 2/
 │       │   └── checkpoints_repaint_sigmoid/   ← sigmoid_out.txt + best_model_sigmoid.pt
 │       └── results/
 │           ├── model_comparison.txt
-│           ├── model_cosine_results/
-│           ├── model_linear_results/
-│           ├── model_quadratic_results/
-│           └── model_sigmoid_results/
+│           ├── cosine_multi_run_grid.png
+│           ├── learning_curve.png
+│           ├── eval__method_compare/        ← per-schedule batch eval comparison
+│           │   ├── eval_results.csv
+│           │   ├── eval_summary.csv
+│           │   ├── model_comparison.txt
+│           │   ├── cosine/   result_01.png … result_10.png
+│           │   ├── linear/   result_01.png … result_10.png
+│           │   ├── quadratic/ result_01.png … result_10.png
+│           │   └── sigmoid/  result_01.png … result_10.png
+│           ├── model_cosine_results/     result_01.png … result_10.png
+│           ├── model_geometric_results/  result_01.png … result_10.png + batch_geometric.log
+│           ├── model_linear_results/     result_01.png … result_10.png
+│           ├── model_quadratic_results/  result_01.png … result_10.png
+│           └── model_sigmoid_results/    result_01.png … result_10.png
 └── Voronoi/                  ← Voronoi tessellation baseline (Fukami et al. 2021)
     ├── model/
     │   ├── voronoi_model.py      ← VoronoiNet (VoronoiLayer + U-Net)
@@ -67,16 +117,17 @@ diffusionInpaintingVectorFields - try 2/
     │   ├── batch_voronoi.py      ← batch evaluation with scattered sensors
     │   └── batch_voronoi_walk.py ← batch evaluation with biased-walk sensors
     ├── models/
-    │   ├── checkpoints_voronoi_scattered/  ← best_model_scattered.pt
-    │   └── checkpoints_voronoi_walk/       ← best_model_walk.pt
+    │   ├── checkpoints_voronoi_scattered/  ← voronoi_train.log (no saved .pt)
+    │   └── checkpoints_voronoi_walk/       ← best_model_walk.pt + voronoi_walk_train.log
     └── results/
         ├── model_comparison.txt
         ├── scattered_out.txt
         ├── walk_out.txt
-        ├── model_scattered_test_scattered/
-        ├── model_scattered_test_walk/
-        ├── model_walk_test_scattered/
-        └── model_walk_test_walk/
+        ├── voronoi_test_result.png
+        ├── model_scattered_test_scattered/  result_01.png … result_10.png
+        ├── model_scattered_test_walk/       result_01.png … result_10.png
+        ├── model_walk_test_scattered/       result_01.png … result_10.png
+        └── model_walk_test_walk/            result_01.png … result_10.png
 ```
 
 **Note on paths:** All scripts use `sys.path.insert` to add the workspace root to the Python
@@ -584,4 +635,88 @@ Additional fixes applied:
   include `results/` subdirectory.
 - `run_repaint.sh`: updated script path to `"Model Parameters/NoiseSchedule/train_repaint.py"`,
   `cd` updated to `/root/ocean_diffusion`, log files routed to checkpoint subdirectories.
+
+---
+
+## Loss Function Ablation — Evaluation Runs (June 5–10, 2026)
+
+### New evaluation scripts
+
+Three new scripts were added to `Model Parameters/Loss Function/`:
+
+| Script | Purpose |
+|---|---|
+| `batch_eval_loss.py` | Original batch eval: 7 models × 10 val samples, 3 metrics |
+| `batch_eval_v2.py` | Run 2 eval: 6 models (no spectral) × 10 samples, 3 metrics, saves 3×3 grid PNGs |
+| `loss_eval_visual.py` | Visual eval: 7 models × 50 samples × 10 diffusion seeds per sample; saves per-sample 4×4 PNGs with per-model **mean reconstruction** + **variance heatmap** |
+| `train_new_losses.sh` | Server script to train remaining loss-function variants |
+
+`loss_eval_visual.py` is the most comprehensive evaluation: for each val sample it runs
+every model 10 times (same robot path, different diffusion noise seeds) and plots the
+**pixelwise variance** across those runs as a heatmap, alongside the mean reconstruction.
+Outputs go to `results/eval_variance_loss/sample_{idx:03d}.png`.
+
+### Run 1 — seed 42, 7 models, 10 val samples (`eval_loss/`)
+
+Samples: [168, 174, 185, 395, 848, 859, 1281, 1368, 1514, 1683]
+
+| Model | RMSE (field) | Spectral RMSE | Wasserstein |
+|---|---|---|---|
+| **strain_rate** | **0.0674** | **21.28** | 0.0751 |
+| **curl_div** | **0.0699** | **21.98** | 0.0785 |
+| eps | 0.0837 | 31.29 | 0.0805 |
+| stream_function | 0.0847 | 29.97 | 0.0735 |
+| wasserstein | 0.0966 | 39.74 | 0.0929 |
+| okubo_weiss | 0.0973 | 24.55 | **0.0405** |
+| spectral | 0.1175 | 71.56 | 0.1055 |
+
+- `strain_rate` wins 5/7 metrics; `curl_div` wins the remaining 2 and is very close on spectral.
+- `spectral` is the worst performer overall and was excluded from Run 2.
+- `okubo_weiss` wins Wasserstein distance by a large margin.
+
+### Run 2 — seed 99, 6 models (no spectral), 10 val samples (`eval_run2/`)
+
+Samples: [348, 990, 1003, 1107, 1208, 1483, 1848, 1874, 1895, 1908]
+
+| Model | RMSE (field) | Spectral RMSE | Wasserstein |
+|---|---|---|---|
+| **eps** | **0.0962** | **21.42** | **0.0463** |
+| curl_div | 0.1029 | 30.00 | 0.0495 |
+| wasserstein | 0.1059 | 41.52 | 0.0623 |
+| stream_function | 0.1106 | 38.13 | 0.0716 |
+| okubo_weiss | 0.1296 | 48.46 | 0.0661 |
+| strain_rate | 0.1666 | 62.10 | 0.0691 |
+
+- **eps wins all 3 metrics on this sample set** — a complete reversal of Run 1.
+- `strain_rate` collapses to worst performer (RMSE 0.067 → 0.167); its Run 1 dominance was
+  sample-set-dependent.
+- `curl_div` remains consistently 2nd best across both runs — the most robust structural loss.
+
+### Cross-run comparison summary
+
+| Model | Run1 RMSE | Run2 RMSE | Run1 Std | Run2 Std |
+|---|---|---|---|---|
+| eps | 0.0837 | 0.0962 | 0.0383 | 0.0425 |
+| curl_div | 0.0699 | 0.1029 | 0.0177 | 0.0923 |
+| okubo_weiss | 0.0973 | 0.1296 | 0.1078 | 0.0993 |
+| wasserstein | 0.0966 | 0.1059 | 0.0244 | 0.0672 |
+| stream_function | 0.0847 | 0.1106 | 0.0285 | 0.0409 |
+| strain_rate | 0.0674 | 0.1666 | 0.0248 | 0.1212 |
+
+**Key takeaway:** No single structural loss consistently outperforms eps-only across both
+sample sets. The eps model is the **most stable** (moderate mean, low variance in both
+runs). `curl_div` has low variance in Run 1 but degrades in Run 2. `strain_rate` shows
+high sensitivity to which samples are evaluated.
+
+### Visual / variance evaluation (`eval_variance_loss/`, June 9–10, 2026)
+
+`loss_eval_visual.py` was launched on the server to produce per-sample 4×4 grid plots
+(ground truth | robot path | model avg | model variance heatmap) for 50 val samples ×
+7 models × 10 diffusion seeds. Results are being downloaded incrementally from the
+server (`182.224.239.168`). As of June 10, **16 of 50 sample PNGs** are available locally
+(`sample_124.png` … `sample_831.png`).
+
+This evaluation will reveal which spatial regions have high stochastic variance under
+each model — i.e., where the model is "uncertain" independent of the robot path.
+
 
