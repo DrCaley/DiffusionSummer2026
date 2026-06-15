@@ -1,0 +1,17 @@
+Model Journal
+
+2026-06-13
+- Started a dedicated journal for the Colored Gaussian Noise DDPM project.
+- Current model: colored-noise DDPM resumed from checkpoints/epoch_400.pt.
+- Training was previously run with batch=16 after batch=32 caused CUDA OOM on the 8 GB GTX 1080.
+- The run had already reached convergence once before the latest restart attempt.
+- Available checkpoints on the server include epoch_100.pt, epoch_200.pt, epoch_300.pt, epoch_400.pt, and the best model checkpoint model_DDPM_MSE_coloredGaussian_cosine.pt.
+- Saved inference outputs in the workspace root:
+  - infer_epoch400_best_fast.png
+  - infer_epoch400_best_full.png
+  - infer_T100.png
+  - compare_repaint_full_vs_t100.png
+- Full RePaint image was generated with T=1000, resample=10.
+- Short RePaint image was generated with T=100, resample=10.
+- A comparison figure was created to contrast the full and short runs.
+- Normalized data note: the pickle data is already normalized; dataset loading only transposes the array and replaces land NaNs with 0.

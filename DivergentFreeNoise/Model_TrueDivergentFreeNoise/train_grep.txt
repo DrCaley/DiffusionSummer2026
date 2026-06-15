@@ -1,0 +1,11 @@
+67:    run_dir = args.run_dir
+68:    checkpoints_dir = run_dir / "checkpoints"
+71:    training_log_path = checkpoints_dir / "training_log.csv"
+72:    journal_path = run_dir / "journal.md"
+74:    with training_log_path.open("w", newline="", encoding="utf-8") as log_file:
+78:    with journal_path.open("w", encoding="utf-8") as journal_file:
+81:        journal_file.write(f"Run directory: {run_dir}\n")
+140:        with journal_path.open("a", encoding="utf-8") as journal_file:
+143:        with training_log_path.open("a", newline="", encoding="utf-8") as log_file:
+177:    print(f"Training log: {training_log_path}")
+178:    print(f"Journal: {journal_path}")

@@ -1,0 +1,14 @@
+Welcome to vast.ai. If authentication fails, try again after a few seconds, and double check your ssh key.
+Have fun!
+actual_sample_0.png
+actual_sample_1.png
+actual_sample_3.png
+loss_sample_0.png
+loss_sample_1.png
+loss_sample_3.png
+overview_sample_0.png
+overview_sample_1.png
+overview_sample_3.png
+predicted_sample_0.png
+predicted_sample_1.png
+predicted_sample_3.png

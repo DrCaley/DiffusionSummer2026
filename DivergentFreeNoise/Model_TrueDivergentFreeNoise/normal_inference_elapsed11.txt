@@ -1,0 +1,3 @@
+REMOTE_OK
+    PID     ELAPSED %CPU CMD
+ 141126       01:50  101 python3 visualize_infer.py --checkpoint checkpoints/best_model.pt --pickle ../data_divfree.pickle --sample 3 --path_steps 150 --resample 10 --output-dir /root/Model_TrueDivergentFreeNoise

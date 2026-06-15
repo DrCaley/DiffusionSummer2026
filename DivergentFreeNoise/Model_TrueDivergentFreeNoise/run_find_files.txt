@@ -1,0 +1,10 @@
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/best_model.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/epoch_0100.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/epoch_0200.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/epoch_0300.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/epoch_0400.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/final_model.pt
+checkpoints/conditional_inpainting_2026-06-14/checkpoints/training_log.csv
+checkpoints/conditional_inpainting_2026-06-14/journal.md
+checkpoints/conditional_inpainting_2026-06-14/train.pid
+checkpoints/conditional_inpainting_2026-06-14/train_stdout.log

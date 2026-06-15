@@ -1,0 +1,2 @@
+KILLED_137910
+root      138175  138165 99 18:08 ?        00:00:21 python3 visualize_infer.py --checkpoint checkpoints/best_model.pt --pickle ../data_divfree.pickle --sample 3 --path_steps 150 --resample 1 --output-dir /root/Model_TrueDivergentFreeNoise
