@@ -1,0 +1,125 @@
+NoiseSchedule RePaint Model Comparison — 300 Epoch Models
+==========================================================
+Date: June 12, 2026 (quadratic, sigmoid, geometric added June 15, 2026)
+
+Architecture: RePaint UNet (same backbone across all schedules), 94x44 grid
+Dataset: Ocean current fields (u, v), validation set (10 samples)
+Inference: RePaint algorithm, r=10 resampling, 150-step biased walk path, T=1000
+
+-----------------------------------------------------------------------
+Model A: Linear noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_linear/best_model_linear.pt
+  Best epoch: 134
+  Results folder: NoiseSchedule/model_linear_300_results/
+
+  Run RMSEs: 0.1141, 0.1208, 0.1837, 0.1487, 0.1241,
+             0.1799, 0.0984, 0.0746, 0.0551, 0.0934
+  Mean RMSE : 0.1193   Std: 0.0400
+
+-----------------------------------------------------------------------
+Model B: Cosine noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_cosine/best_model_cosine.pt
+  Best epoch: 207
+  Results folder: NoiseSchedule/model_cosine_results/
+
+  Run RMSEs: 0.1120, 0.1040, 0.1826, 0.0727, 0.1614,
+             0.1746, 0.1408, 0.1126, 0.1811, 0.1424
+  Mean RMSE : 0.1384   Std: 0.0353
+
+-----------------------------------------------------------------------
+Model C: Cosine s=0.001 noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_cosine_s0001/best_model_cosine_s0001.pt
+  Best epoch: 263
+  Results folder: NoiseSchedule/model_cosine_s0001_results/
+
+  Run RMSEs: 0.0921, 0.0783, 0.1668, 0.0599, 0.1408,
+             0.1006, 0.1017, 0.0845, 0.2234, 0.4050
+  Mean RMSE : 0.1453   Std: 0.0981
+
+-----------------------------------------------------------------------
+Model D: Cosine s=0.02 noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_cosine_s02/best_model_cosine_s02.pt
+  Best epoch: 197
+  Results folder: NoiseSchedule/model_cosine_s02_results/
+
+  Run RMSEs: 0.0837, 0.1121, 0.1055, 0.0903, 0.1838,
+             0.2656, 0.0833, 0.1656, 0.1533, 0.0850
+  Mean RMSE : 0.1328   Std: 0.0564
+
+-----------------------------------------------------------------------
+Model E: Cosine s=0.10 noise schedule
+  Checkpoint: NoiseSchedule/checkpoints_repaint_cosine_s10/best_model_cosine_s10.pt
+  Best epoch: 238
+  Results folder: NoiseSchedule/model_cosine_s10_results/
+
+  Run RMSEs: 0.0729, 0.0882, 0.1515, 0.0878, 0.1087,
+             0.1027, 0.0917, 0.0792, 0.0868, 0.1015
+  Mean RMSE : 0.0971   Std: 0.0209
+
+-----------------------------------------------------------------------
+Model F: Quadratic noise schedule
+  Checkpoint: NoiseSchedule/epoch_300_models/quadratic/checkpoints_repaint_quadratic/best_model_quadratic.pt
+  Best epoch: 161
+  Results folder: NoiseSchedule/epoch_300_models/quadratic/model_quadratic_results/
+
+  Run RMSEs: 0.0877, 0.1335, 0.1450, 0.0511, 0.1388,
+             0.1260, 0.0563, 0.1739, 0.1163, 0.4539
+  Mean RMSE : 0.1483   Std: 0.1084
+
+-----------------------------------------------------------------------
+Model G: Sigmoid noise schedule
+  Checkpoint: NoiseSchedule/epoch_300_models/sigmoid/checkpoints_repaint_sigmoid/best_model_sigmoid.pt
+  Best epoch: 199
+  Results folder: NoiseSchedule/epoch_300_models/sigmoid/model_sigmoid_results/
+
+  Run RMSEs: 0.1172, 0.1416, 0.1018, 0.1508, 0.1459,
+             0.1006, 0.0773, 0.0955, 0.1101, 0.1118
+  Mean RMSE : 0.1153   Std: 0.0227
+
+-----------------------------------------------------------------------
+Model H: Geometric noise schedule
+  Checkpoint: NoiseSchedule/epoch_300_models/geometric/checkpoints_repaint_geometric/best_model_geometric.pt
+  Best epoch: 96
+  Results folder: NoiseSchedule/epoch_300_models/geometric/model_geometric_results/
+
+  Run RMSEs: 0.0954, 0.5985, 0.2920, 0.5018, 0.5260,
+             0.7475, 0.1071, 0.3400, 0.2682, 0.8167
+  Mean RMSE : 0.4293   Std: 0.2372
+
+-----------------------------------------------------------------------
+Summary Table (Mean RMSE, lower is better):
+
+  Schedule      | Mean RMSE | Std    | Best epoch |
+  --------------|-----------|--------|------------|
+  Cosine s=0.10 |  0.0971   | 0.0209 |    238     |
+  Linear        |  0.1193   | 0.0400 |    134     |
+  Sigmoid       |  0.1153   | 0.0227 |    199     |
+  Cosine s=0.02 |  0.1328   | 0.0564 |    197     |
+  Cosine        |  0.1384   | 0.0353 |    207     |
+  Cosine s=0.001|  0.1453   | 0.0981 |    263     |
+  Quadratic     |  0.1483   | 0.1084 |    161     |
+  Geometric     |  0.4293   | 0.2372 |     96     |
+  --------------|-----------|--------|------------|
+
+Key observations:
+- Cosine s=0.10 remains the best at 300 epochs (Mean RMSE 0.0971, Std 0.0209), a large
+  improvement over its 100-epoch run (0.1628, Std 0.0947) — it needed much more training
+- Sigmoid improved substantially from 100→300 epochs (0.1357→0.1153) with very low
+  variance (Std=0.0227), making it the second most consistent schedule overall
+- Linear improved dramatically: 0.2397→0.1193, with no extreme outliers
+- Quadratic regressed from 100→300 epochs (0.1147→0.1483), driven by one catastrophic
+  outlier (result_10: 0.4539); best epoch was 161, early overfit after that
+- Geometric catastrophically regressed: 0.1635→0.4293 with Std=0.2372 — 8 of 10 runs
+  scored above 0.25 RMSE. Best checkpoint was epoch 96 but overfit severely after ~epoch
+  120; training to 300 epochs was actively harmful for this schedule
+- Cosine s=0.02 regressed vs 100 epochs (0.1028→0.1328); the 100-epoch checkpoint was
+  stronger
+- Cosine s=0.001 also regressed (0.1177→0.1453) with high variance driven by one
+  outlier run (result_10: 0.4050)
+- Standard Cosine improved slightly (0.1692→0.1384)
+- The s parameter in cosine schedules spans s=0.001, s=0.02, s=0.10 in these experiments;
+  s=0.10 is the clear winner at 300 epochs, though it required significantly more training
+  to converge than the smaller s values — suggesting larger offsets slow early learning
+  but ultimately produce more stable, lower-variance models
+- All best checkpoints for converging models fall between epoch 134–263; geometric's
+  early best at epoch 96 confirms it converges (and overfits) faster than all others

@@ -9,6 +9,10 @@ Usage (run from workspace root):
     python3 NoiseSchedule/train_repaint.py --schedule linear --epochs 100 --batch 32
     python3 NoiseSchedule/train_repaint.py --schedule quadratic
     python3 NoiseSchedule/train_repaint.py --schedule sigmoid
+
+Resume training from a checkpoint:
+    python3 NoiseSchedule/train_repaint.py --schedule quadratic --epochs 200 \\
+        --resume NoiseSchedule/checkpoints_repaint_quadratic/best_model_quadratic.pt
 """
 
 import argparse
@@ -16,6 +20,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # prefer NoiseSchedule/diffusion.py
 
 import torch
 from torch.utils.data import DataLoader
@@ -41,11 +46,15 @@ def parse_args():
     p.add_argument("--time_dim", type=int,   default=256)
     p.add_argument("--T",        type=int,   default=1000)
     p.add_argument("--schedule", default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"],
+                   choices=["linear", "cosine", "cosine_s0001", "cosine_s02", "cosine_s10",
+                            "quadratic", "sigmoid", "geometric"],
                    help="Noise schedule to use for training.")
     p.add_argument("--save_dir", default=None,
                    help="Checkpoint directory. Defaults to "
                         "NoiseSchedule/checkpoints_repaint_{schedule}.")
+    p.add_argument("--resume", default=None,
+                   help="Path to a checkpoint (.pt) to resume training from. "
+                        "Restores model, optimizer, scheduler, and epoch.")
     p.add_argument("--workers",  type=int,   default=0)
     return p.parse_args()
 
@@ -76,6 +85,11 @@ def main():
 
     land_mask = train_ds.land_mask.to(device)   # (H, W) bool
 
+    # Compute noise_std from training ocean pixels so noise lives in data's range
+    ocean_pixels = train_ds.data[:, :, ~train_ds.land_mask]  # (N, 2, n_ocean)
+    noise_std = float(ocean_pixels.std())
+    print(f"Data noise_std   : {noise_std:.5f}  (ocean pixels std, used to scale diffusion noise)")
+
     train_loader = DataLoader(
         train_ds, batch_size=args.batch, shuffle=True,
         num_workers=args.workers, pin_memory=(device == "cuda"),
@@ -90,17 +104,32 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters : {n_params:,}")
 
-    diffusion = DDPM(T=args.T, beta_schedule=args.schedule, device=device)
+    diffusion = DDPM(T=args.T, beta_schedule=args.schedule, device=device,
+                     noise_std=noise_std)
 
     # ---- Optimiser ----
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
+    # ---- Resume ----
+    start_epoch = 0
+    best_val    = float("inf")
+    if args.resume:
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model"])
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        if "val_loss" in ckpt:
+            best_val = ckpt["val_loss"]
+        start_epoch = ckpt.get("epoch", 0)
+        print(f"Resumed from epoch {start_epoch}, best_val={best_val:.5f}")
+
     # ---- Training loop ----
-    best_val  = float("inf")
     best_name = f"best_model_{args.schedule}.pt"
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         # -- Train --
         model.train()
         train_loss = 0.0
@@ -132,13 +161,19 @@ def main():
             best_val = val_loss
             torch.save(
                 {"epoch": epoch, "model": model.state_dict(),
-                 "val_loss": val_loss, "args": vars(args)},
+                 "optimizer": optimizer.state_dict(),
+                 "scheduler": scheduler.state_dict(),
+                 "val_loss": val_loss, "args": vars(args),
+                 "noise_std": noise_std},
                 os.path.join(args.save_dir, best_name),
             )
 
-        if epoch % 10 == 0:
+        if epoch % 50 == 0:
             torch.save(
-                {"epoch": epoch, "model": model.state_dict(), "args": vars(args)},
+                {"epoch": epoch, "model": model.state_dict(),
+                 "optimizer": optimizer.state_dict(),
+                 "scheduler": scheduler.state_dict(),
+                 "args": vars(args), "noise_std": noise_std},
                 os.path.join(
                     args.save_dir,
                     f"ckpt_{args.schedule}_epoch{epoch:04d}.pt"

@@ -14,6 +14,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # prefer NoiseSchedule/diffusion.py
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -27,6 +28,27 @@ from repaint_infer  import biased_walk_path, repaint
 
 
 # ---------------------------------------------------------------------------
+# Stdout tee  — ensures log is always written as batch_{schedule}.log
+# ---------------------------------------------------------------------------
+
+class _Tee:
+    """Mirror stdout to a file, preserving the exact same output."""
+    def __init__(self, path):
+        self._file   = open(path, "w", buffering=1)
+        self._stdout = sys.stdout
+        sys.stdout   = self
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+    def close(self):
+        sys.stdout = self._stdout
+        self._file.close()
+
+
+# ---------------------------------------------------------------------------
 # Args
 # ---------------------------------------------------------------------------
 
@@ -34,7 +56,8 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pickle",      default="data.pickle")
     p.add_argument("--schedule",    default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"])
+                   choices=["linear", "cosine", "cosine_s0001", "cosine_s02", "cosine_s10",
+                            "quadratic", "sigmoid", "geometric"])
     p.add_argument("--checkpoint",  default=None,
                    help="Path to checkpoint. Defaults to "
                         "checkpoints_repaint_{schedule}/best_model_{schedule}.pt")
@@ -200,12 +223,14 @@ def main():
     if args.out_dir is None:
         args.out_dir = os.path.join(script_dir, f"model_{args.schedule}_results")
 
+    os.makedirs(args.out_dir, exist_ok=True)
+    log_path = os.path.join(args.out_dir, f"batch_{args.schedule}.log")
+    tee = _Tee(log_path)
+
     print(f"Device     : {device}")
     print(f"Schedule   : {args.schedule}")
     print(f"Checkpoint : {args.checkpoint}")
     print(f"Output dir : {args.out_dir}")
-
-    os.makedirs(args.out_dir, exist_ok=True)
 
     # ---- Load data ----
     val_ds    = OceanCurrentDataset(args.pickle, split=1)
@@ -224,7 +249,15 @@ def main():
     model.eval()
     print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}), T={T}, schedule={schedule}")
 
-    diffusion = DDPM(T=T, beta_schedule=schedule, device=device)
+    noise_std = ckpt.get("noise_std", None)
+    if noise_std is None:
+        train_ds  = OceanCurrentDataset(args.pickle, split=0)
+        noise_std = float(train_ds.data[:, :, ~train_ds.land_mask].std())
+        print(f"noise_std : {noise_std:.5f}  (computed from training data)")
+    else:
+        print(f"noise_std : {noise_std:.5f}  (from checkpoint)")
+
+    diffusion = DDPM(T=T, beta_schedule=schedule, device=device, noise_std=noise_std)
 
     # ---- 10 runs: val samples 0–9, seeds spread apart ----
     rmse_list = []
@@ -249,6 +282,7 @@ def main():
     print(f"\nAll done.")
     print(f"RMSE per run : {[f'{r:.4f}' for r in rmse_list]}")
     print(f"Mean RMSE    : {np.mean(rmse_list):.4f}   Std: {np.std(rmse_list):.4f}")
+    tee.close()
 
 
 if __name__ == "__main__":

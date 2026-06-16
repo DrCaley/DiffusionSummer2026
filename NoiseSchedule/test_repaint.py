@@ -42,7 +42,7 @@ def parse_args():
     )
     p.add_argument("--pickle",      default="data.pickle")
     p.add_argument("--schedule",    default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"])
+                   choices=["linear", "cosine", "cosine_s0001", "cosine_s02", "cosine_s10", "quadratic", "sigmoid", "geometric"])
     p.add_argument("--checkpoint",  default=None,
                    help="Defaults to checkpoints_repaint_{schedule}/best_model_{schedule}.pt")
     p.add_argument("--sample",      type=int,   default=0,
@@ -138,7 +138,15 @@ def main():
     saved_val   = ckpt.get("val_loss", float("nan"))
     print(f"Checkpoint    : epoch {saved_epoch}, val_loss={saved_val:.5f}")
 
-    diffusion = DDPM(T=T, beta_schedule=schedule, device=device)
+    noise_std = ckpt.get("noise_std", None)
+    if noise_std is None:
+        train_ds  = OceanCurrentDataset(args.pickle, split=0)
+        noise_std = float(train_ds.data[:, :, ~train_ds.land_mask].std())
+        print(f"noise_std     : {noise_std:.5f}  (computed from training data)")
+    else:
+        print(f"noise_std     : {noise_std:.5f}  (from checkpoint)")
+
+    diffusion = DDPM(T=T, beta_schedule=schedule, device=device, noise_std=noise_std)
 
     # ---- Test-set evaluation -------------------------------------------------
     n_eval   = min(args.max_samples, len(test_ds))
