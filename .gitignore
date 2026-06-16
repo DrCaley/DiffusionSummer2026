@@ -1,10 +1,19 @@
-# Dataset (too large for GitHub)
+# Datasets — pickle files are too large for GitHub
 data.pickle
+Datasets/*.pickle
+
+# Spectral filter is small (16 KB) and IS tracked
+!Datasets/spectral_filter.npy
+
+# Generated visualisation images (re-created by scripts)
+Datasets/*.png
+DDPM/best_model_results/
 
 # Model checkpoints (binary weights)
 *.pt
 *.pth
 Models/
+checkpoints*/
 
 # Python cache
 __pycache__/
@@ -15,10 +24,16 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
+# Local environment file
+.env
+
 # Virtual environments
 .venv/
 venv/
 env/
+
+# Editor
+.vscode/
 
 # OS
 .DS_Store
