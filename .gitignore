@@ -5,9 +5,11 @@ Datasets/*.pickle
 # Spectral filter is small (16 KB) and IS tracked
 !Datasets/spectral_filter.npy
 
-# Generated visualisation images (re-created by scripts)
+# Generated visualisation images and eddy catalog (re-created by scripts)
 Datasets/*.png
 DDPM/best_model_results/
+eddies/eddy_catalog.json
+eddies/*.png
 
 # Model checkpoints (binary weights)
 *.pt

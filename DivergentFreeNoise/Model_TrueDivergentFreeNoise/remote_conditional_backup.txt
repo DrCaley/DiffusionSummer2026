@@ -1,9 +1,0 @@
-REMOTE_OK
-best_model.pt
-epoch_0100.pt
-epoch_0200.pt
-epoch_0300.pt
-epoch_0400.pt
-final_model.pt
-training_log.csv
-true_divfree_train.log

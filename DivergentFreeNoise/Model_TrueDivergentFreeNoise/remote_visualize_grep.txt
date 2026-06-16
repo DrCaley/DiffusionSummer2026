@@ -1,4 +1,0 @@
-Welcome to vast.ai. If authentication fails, try again after a few seconds, and double check your ssh key.
-Have fun!
-60:    predicted_skip_last = diffusion.repaint(model, observed, observation_mask, land, resample=args.resample, skip_last_step=True)
-74:    comparison_path = args.output_dir / f"comparison_sample_{sample_index}.png"

@@ -1,2 +1,0 @@
-REMOTE_OK
-root      137910  137900 99 18:05 ?        00:01:06 python3 visualize_infer.py --checkpoint checkpoints/best_model.pt --pickle ../data_divfree.pickle --sample 3 --path_steps 150 --resample 10 --output-dir /root/Model_TrueDivergentFreeNoise
