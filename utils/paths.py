@@ -125,3 +125,83 @@ def biased_walk_path(
         path_mask[r, c] = True
 
     return path_mask
+
+
+def basic_robot_path(
+    land_mask:    np.ndarray,
+    segment_len:  int = 10,
+    seed:         int | None = None,
+) -> np.ndarray:
+    """
+    Two-segment straight-line path with a single random turn in the middle.
+
+    The robot travels straight for `segment_len` steps, makes one random
+    heading change (90 deg right, 45 deg right, straight, 45 deg left, or
+    90 deg left), then travels straight for another `segment_len` steps.
+    Total path length is at most 2 * segment_len + 1 cells.
+
+    Uses 8-directional movement so 45 deg turns are exact on the grid.
+    Steps that would enter land or leave the grid are skipped silently.
+
+    Args:
+        land_mask:   (H, W) bool, True = land
+        segment_len: steps per straight segment (default 10)
+        seed:        optional RNG seed
+
+    Returns:
+        path_mask: (H, W) bool, True = cells the robot visited
+    """
+    rng = np.random.default_rng(seed)
+    H, W = land_mask.shape
+
+    # 8 directions clockwise: N, NE, E, SE, S, SW, W, NW
+    ALL_DIRS = [
+        (-1,  0), (-1,  1), ( 0,  1), ( 1,  1),
+        ( 1,  0), ( 1, -1), ( 0, -1), (-1, -1),
+    ]
+
+    ocean_cells = list(zip(*np.where(~land_mask)))
+    if not ocean_cells:
+        raise ValueError("No ocean cells found in land_mask.")
+
+    start = ocean_cells[rng.integers(len(ocean_cells))]
+    r, c  = int(start[0]), int(start[1])
+
+    path_mask = np.zeros((H, W), dtype=bool)
+    path_mask[r, c] = True
+
+    target = 2 * segment_len + 1  # start cell + two full segments
+
+    for _ in range(10_000):
+        r, c    = int(start[0]), int(start[1])
+        pm      = np.zeros((H, W), dtype=bool)
+        pm[r, c] = True
+        dir_idx = int(rng.integers(8))
+
+        def walk(n, direction):
+            nonlocal r, c
+            for _ in range(n):
+                dr, dc = ALL_DIRS[direction]
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < H and 0 <= nc < W and not land_mask[nr, nc]:
+                    r, c = nr, nc
+                    pm[r, c] = True
+                else:
+                    return False  # blocked
+            return True
+
+        seg1_ok = walk(segment_len, dir_idx)
+
+        offset  = int(rng.choice([-2, -1, 0, 1, 2]))
+        dir_idx = (dir_idx + offset) % 8
+
+        seg2_ok = walk(segment_len, dir_idx)
+
+        if seg1_ok and seg2_ok and pm.sum() == target:
+            return pm
+
+        # Try a fresh start position and heading next attempt
+        start = ocean_cells[rng.integers(len(ocean_cells))]
+
+    # Fallback: return whatever the last attempt produced
+    return pm
