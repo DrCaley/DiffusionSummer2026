@@ -29,25 +29,28 @@ from paths import random_walk_path, biased_walk_path  # noqa: F401  (re-exported
 
 @torch.no_grad()
 def repaint(
-    model:      torch.nn.Module,
+    model:            torch.nn.Module,
     diffusion,                        # DDPM instance
-    x0_known:   torch.Tensor,         # (2, H, W) observed field (0 outside path)
-    path_mask:  np.ndarray,           # (H, W) bool, True = known path cell
-    land_mask:  np.ndarray,           # (H, W) bool, True = land
-    r:          int = 10,             # resampling iterations per timestep
-    device:     str = "cpu",
+    x0_known:         torch.Tensor,   # (2, H, W) observed field (0 outside path)
+    path_mask:        np.ndarray,     # (H, W) bool, True = known path cell
+    land_mask:        np.ndarray,     # (H, W) bool, True = land
+    r:                int = 10,       # resampling iterations per timestep
+    device:           str = "cpu",
+    inference_steps:  int | None = None,  # None = use all T steps
 ) -> torch.Tensor:
     """
     Run RePaint to reconstruct the full current field from sparse path observations.
 
     Args:
-        model:     trained unconditional UNet
-        diffusion: DDPM instance
-        x0_known:  (2, H, W) tensor — true u/v at path cells, 0 elsewhere
-        path_mask: (H, W) bool — True at cells the robot visited
-        land_mask: (H, W) bool — True at land cells
-        r:         RePaint resampling count (r=1 = no resampling, r=10 = paper default)
-        device:    torch device string
+        model:           trained unconditional UNet
+        diffusion:       DDPM instance
+        x0_known:        (2, H, W) tensor — true u/v at path cells, 0 elsewhere
+        path_mask:       (H, W) bool — True at cells the robot visited
+        land_mask:       (H, W) bool — True at land cells
+        r:               RePaint resampling count (r=1 = no resampling, r=10 = paper default)
+        device:          torch device string
+        inference_steps: number of denoising steps (default: full T).
+                         E.g. 100 with T=1000 visits t=999,989,...,9 (every 10th).
 
     Returns:
         x0_pred: (2, H, W) reconstructed vector field (land pixels = 0)
@@ -62,29 +65,31 @@ def repaint(
     land_t  = torch.from_numpy(land_mask).float().to(device)[None, None]
     ocean_t = 1.0 - land_t
 
-    # Start from pure noise
-    xt = torch.randn(1, 2, H, W, device=device)
+    # Start from noise — type and scale determined by the diffusion object
+    xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device)) * diffusion.noise_scale
     xt = xt * ocean_t  # land stays 0
 
-    T = diffusion.T
+    n_steps  = inference_steps if inference_steps is not None else diffusion.T
+    schedule = diffusion.build_inference_schedule(n_steps)   # [(t, t_prev), ...]
 
-    for t_int in reversed(range(T)):
+    for t_int, t_prev_int in schedule:
         for j in range(r):
             # --- Step 1: model reverse step for unknown pixels ---
-            xt_unknown = diffusion.p_sample_step(model, xt, t_int)
+            xt_unknown = diffusion.p_sample_step(model, xt, t_int, t_prev_int)
 
-            # --- Step 2: forward-diffuse x0_known to timestep (t-1 or 0) ---
-            t_prev = max(t_int - 1, 0)
-            t_prev_tensor = torch.full((1,), t_prev, device=device, dtype=torch.long)
+            # --- Step 2: forward-diffuse x0_known to timestep t_prev (or 0) ---
+            t_prev_q = max(t_prev_int, 0)
+            t_prev_tensor = torch.full((1,), t_prev_q, device=device, dtype=torch.long)
             xt_known, _ = diffusion.q_sample(x0_known, t_prev_tensor)
 
             # --- Step 3: merge ---
             xt_merged = known_t * xt_known + (1.0 - known_t) * xt_unknown
             xt_merged = xt_merged * ocean_t   # keep land at 0
+            xt_merged = torch.nan_to_num(xt_merged, nan=0.0, posinf=1.0, neginf=-1.0)
 
             # --- Step 4: resample (go forward one step) if not last iteration ---
-            if j < r - 1 and t_int > 0:
-                xt = diffusion.q_sample_from_prev(xt_merged, t_int)
+            if j < r - 1 and t_prev_int >= 0:
+                xt = diffusion.q_sample_from_prev(xt_merged, t_int, t_prev_int)
                 xt = xt * ocean_t
             else:
                 xt = xt_merged

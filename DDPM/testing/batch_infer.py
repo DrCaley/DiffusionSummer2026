@@ -31,9 +31,13 @@ def parse_args():
     p.add_argument("--n_runs",      type=int, default=10,  help="number of runs")
     p.add_argument("--path_steps",  type=int, default=150, help="robot walk length")
     p.add_argument("--resample",    type=int, default=10,  help="RePaint r parameter")
-    p.add_argument("--T",           type=int, default=1000)
-    p.add_argument("--base_ch",     type=int, default=64)
-    p.add_argument("--time_dim",    type=int, default=256)
+    p.add_argument("--T",           type=int,   default=1000)
+    p.add_argument("--base_ch",     type=int,   default=64)
+    p.add_argument("--time_dim",    type=int,   default=256)
+    p.add_argument("--noise_scale", type=float, default=None,
+                   help="Override noise scale (default: read from checkpoint args, fallback 1.0)")
+    p.add_argument("--sample_seed", type=int, default=42,
+                   help="RNG seed for random val sample selection (default: 42)")
     p.add_argument("--out_dir",     default="batch_results")
     return p.parse_args()
 
@@ -146,25 +150,30 @@ def main():
     # Load model
     ckpt      = torch.load(args.checkpoint, map_location=device, weights_only=False)
     ckpt_args = ckpt.get("args", {})
-    base_ch   = ckpt_args.get("base_ch",  args.base_ch)
-    time_dim  = ckpt_args.get("time_dim", args.time_dim)
-    T         = ckpt_args.get("T",        args.T)
+    base_ch     = ckpt_args.get("base_ch",     args.base_ch)
+    time_dim    = ckpt_args.get("time_dim",    args.time_dim)
+    T           = ckpt_args.get("T",           args.T)
+    noise_scale = args.noise_scale if args.noise_scale is not None else ckpt_args.get("noise_scale", 1.0)
 
     model = UNet(in_ch=2, base_ch=base_ch, time_dim=time_dim).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
-    print(f"Loaded checkpoint (epoch {ckpt.get('epoch','?')}), T={T}")
+    print(f"Loaded checkpoint (epoch {ckpt.get('epoch','?')}), T={T}, noise_scale={noise_scale}")
 
-    diffusion = DDPM(T=T, beta_schedule="cosine", device=device)
+    diffusion = DDPM(T=T, beta_schedule="cosine", device=device, noise_scale=noise_scale)
 
-    # 10 runs: val samples 0-9, seeds 0-9
+    # Pick n_runs random val sample indices (without replacement)
+    rng = np.random.default_rng(args.sample_seed)
+    n_val = len(val_ds)
+    sample_indices = rng.choice(n_val, size=args.n_runs, replace=False).tolist()
+    print(f"Val set size: {n_val}, selected samples: {sample_indices}")
+
     rmse_list = []
-    for i in range(args.n_runs):
-        label      = i + 1
-        sample_idx = i          # val sample index
-        seed       = i * 7 + 1  # distinct seeds spread apart
+    for i, sample_idx in enumerate(sample_indices):
+        label = i + 1
+        seed  = i * 7 + 1  # distinct path seeds spread apart
 
-        print(f"\n[Run {label}/10]  val sample={sample_idx}, seed={seed}")
+        print(f"\n[Run {label}/{args.n_runs}]  val sample={sample_idx}, seed={seed}")
         (u_true, v_true, u_pred, v_pred,
          land_d, path_d, err_d, rmse, path_cells) = run_one(
             model, diffusion, val_ds, land_mask,

@@ -21,7 +21,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset        import OceanCurrentDataset
-from diffusion      import DDPM
+from diffusion      import DDPM, NOISE_TYPES
 from repaint_model  import Repaint
 
 
@@ -41,8 +41,11 @@ def parse_args():
     p.add_argument("--time_dim", type=int,   default=256)
     p.add_argument("--T",        type=int,   default=1000)
     p.add_argument("--schedule", default="cosine",
-                   choices=["linear", "cosine", "quadratic", "sigmoid"],
+                   choices=["linear", "cosine", "quadratic", "sigmoid", "geometric"],
                    help="Noise schedule to use for training.")
+    p.add_argument("--noise_type", default="gaussian", choices=list(NOISE_TYPES),
+                   help="Noise type for the forward process: 'gaussian' (default) or "
+                        "'div_free' (divergence-free via Fourier projection).")
     p.add_argument("--save_dir", default=None,
                    help="Checkpoint directory. Defaults to "
                         "NoiseSchedule/checkpoints_repaint_{schedule}.")
@@ -64,9 +67,10 @@ def main():
             script_dir, "checkpoints", f"checkpoints_repaint_{args.schedule}"
         )
 
-    print(f"Device   : {device}")
-    print(f"Schedule : {args.schedule}")
-    print(f"Save dir : {args.save_dir}")
+    print(f"Device     : {device}")
+    print(f"Schedule   : {args.schedule}")
+    print(f"Noise type : {args.noise_type}")
+    print(f"Save dir   : {args.save_dir}")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -90,7 +94,8 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters : {n_params:,}")
 
-    diffusion = DDPM(T=args.T, beta_schedule=args.schedule, device=device)
+    diffusion = DDPM(T=args.T, beta_schedule=args.schedule, device=device,
+                     noise_type=args.noise_type)
 
     # ---- Optimiser ----
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -98,7 +103,7 @@ def main():
 
     # ---- Training loop ----
     best_val  = float("inf")
-    best_name = f"best_model_{args.schedule}.pt"
+    best_name = f"best_model_{args.schedule}_{args.noise_type}.pt"
 
     for epoch in range(1, args.epochs + 1):
         # -- Train --

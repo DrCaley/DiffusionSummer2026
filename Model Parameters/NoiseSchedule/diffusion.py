@@ -1,22 +1,47 @@
+import importlib.util
 import math
+import os
+
 import torch
 import torch.nn.functional as F
+
+# ---------------------------------------------------------------------------
+# Load div_free_noise.py from utils/ via importlib so this file can be
+# imported from any working directory.
+# ---------------------------------------------------------------------------
+_df_path = os.path.join(
+    os.path.dirname(__file__), "..", "utils", "div_free_noise.py"
+)
+_df_spec = importlib.util.spec_from_file_location(
+    "div_free_noise", os.path.abspath(_df_path)
+)
+_df_mod = importlib.util.module_from_spec(_df_spec)
+_df_spec.loader.exec_module(_df_mod)
+
+NOISE_TYPES           = _df_mod.NOISE_TYPES
+_divergence_free_noise = _df_mod.divergence_free_noise
 
 
 class DDPM:
     """
     Denoising Diffusion Probabilistic Model utilities.
 
-    Supports four named noise schedules:
+    Supports five named noise schedules:
         "linear"    - linearly spaced betas from 1e-4 to 0.02
         "cosine"    - cosine schedule (Nichol & Dhariwal 2021)
         "quadratic" - quadratically spaced betas (sqrt-linear then squared)
         "sigmoid"   - sigmoid-shaped betas rescaled to [1e-4, 0.02]
+        "geometric" - geometrically spaced betas (exponential, Kingma et al. 2021)
     """
 
-    def __init__(self, T: int = 1000, beta_schedule: str = "cosine", device: str = "cpu"):
+    def __init__(self, T: int = 1000, beta_schedule: str = "cosine", device: str = "cpu",
+                 noise_type: str = "gaussian"):
         self.T      = T
         self.device = device
+
+        if noise_type not in NOISE_TYPES:
+            raise ValueError(f"noise_type must be one of {NOISE_TYPES}, got '{noise_type}'")
+        self.noise_type = noise_type
 
         if beta_schedule == "cosine":
             betas = self._cosine_betas(T)
@@ -27,10 +52,15 @@ class DDPM:
         elif beta_schedule == "sigmoid":
             betas = torch.sigmoid(torch.linspace(-6, 6, T))
             betas = betas * (0.02 - 1e-4) + 1e-4
+        elif beta_schedule == "geometric":
+            beta_min = 1e-4
+            beta_max = 0.02
+            r = (beta_max / beta_min) ** (1.0 / (T - 1))
+            betas = beta_min * (r ** torch.arange(T, dtype=torch.float64)).float()
         else:
             raise ValueError(
                 f"Unknown beta_schedule: {beta_schedule!r}. "
-                f"Choose from 'linear', 'cosine', 'quadratic', 'sigmoid'."
+                f"Choose from 'linear', 'cosine', 'quadratic', 'sigmoid', 'geometric'."
             )
 
         self.betas    = betas.to(device)
@@ -43,6 +73,16 @@ class DDPM:
         )
         self.sqrt_ab      = self.alpha_bar.sqrt()
         self.sqrt_one_mab = (1.0 - self.alpha_bar).sqrt()
+
+    # ------------------------------------------------------------------
+    # Noise sampler
+    # ------------------------------------------------------------------
+
+    def _sample_noise(self, like: torch.Tensor) -> torch.Tensor:
+        """Return noise with the same shape/device as `like`."""
+        if self.noise_type == "gaussian":
+            return torch.randn_like(like)
+        return _divergence_free_noise(like.shape, device=str(like.device))
 
     # ------------------------------------------------------------------
     # Noise schedules
@@ -68,7 +108,7 @@ class DDPM:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample x_t ~ q(x_t | x_0) = N(sqrt(ᾱ_t)*x0, (1-ᾱ_t)*I)."""
         if noise is None:
-            noise = torch.randn_like(x0)
+            noise = self._sample_noise(x0)
         sqrt_ab  = self.sqrt_ab[t][:, None, None, None]
         sqrt_mab = self.sqrt_one_mab[t][:, None, None, None]
         return sqrt_ab * x0 + sqrt_mab * noise, noise
@@ -146,7 +186,7 @@ class DDPM:
 
         # Posterior variance
         var = (1.0 - ab_prev) / (1.0 - ab) * beta
-        return mean + var.sqrt() * torch.randn_like(xt)
+        return mean + var.sqrt() * self._sample_noise(xt)
 
     # ------------------------------------------------------------------
     # One forward step  q(x_t | x_{t-1})  — used by RePaint resampling
@@ -158,4 +198,4 @@ class DDPM:
         x_t = sqrt(alpha_t) * x_{t-1} + sqrt(1 - alpha_t) * eps
         """
         alpha = self.alphas[t_int]
-        return alpha.sqrt() * x_prev + (1.0 - alpha).sqrt() * torch.randn_like(x_prev)
+        return alpha.sqrt() * x_prev + (1.0 - alpha).sqrt() * self._sample_noise(x_prev)
