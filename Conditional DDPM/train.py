@@ -285,7 +285,8 @@ def main():
                 x0 = x0.to(device)
                 cond = _make_cond(
                     x0, land_mask_np, voronoi_layer,
-                    args.cond, args.path_steps, epoch, batch_idx, device,
+                    args.cond, args.path_fn, args.path_steps, args.segment_len,
+                    epoch, batch_idx, device,
                 )
                 loss = diffusion.training_loss(model, x0, land_mask, cond)
                 val_loss += loss.item()
