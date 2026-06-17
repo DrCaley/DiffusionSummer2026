@@ -144,12 +144,22 @@ def leray_project(x: torch.Tensor, ocean_mask: torch.Tensor) -> torch.Tensor:
 
     kH      = torch.fft.fftfreq(H, d=1.0, device=device).view(H, 1)
     kW      = torch.fft.fftfreq(W, d=1.0, device=device).view(1, W)
-    k2      = kH ** 2 + kW ** 2
-    k2_safe = torch.where(k2 > 0.0, k2, torch.ones_like(k2))
+    # Use the DISCRETE central-difference Fourier symbol sin(2*pi*f) rather than
+    # the continuous symbol (proportional to f).  The metric in divergence()
+    # measures central-difference divergence, whose Fourier symbol is i*sin(2*pi*f).
+    # Projecting with the continuous symbol only cancels divergence at low
+    # wavenumbers and leaves substantial finite-difference divergence on
+    # high-frequency content (verified: rough-field FD|div| stuck at ~0.28).
+    # Using the matching discrete symbol drives the measured divergence to ~0
+    # across all frequencies (~0.017 on white noise, far lower on smooth fields).
+    sH      = torch.sin(2.0 * torch.pi * kH)
+    sW      = torch.sin(2.0 * torch.pi * kW)
+    s2      = sH ** 2 + sW ** 2
+    s2_safe = torch.where(s2 > 0.0, s2, torch.ones_like(s2))
 
-    dot      = kH * hat_u + kW * hat_v
-    hat_u_df = hat_u - kH * dot / k2_safe
-    hat_v_df = hat_v - kW * dot / k2_safe
+    dot      = sH * hat_u + sW * hat_v
+    hat_u_df = hat_u - sH * dot / s2_safe
+    hat_v_df = hat_v - sW * dot / s2_safe
 
     u_df = torch.fft.ifft2(hat_u_df).real
     v_df = torch.fft.ifft2(hat_v_df).real

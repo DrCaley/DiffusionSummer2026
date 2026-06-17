@@ -41,6 +41,8 @@ def ppr(
     device:           str   = "cpu",
     projector:        str   = "pocs",
     inference_steps:  int | None = None,  # None = use all T steps
+    data_mean:        float | None = None,  # training-time normalization mean
+    data_std:         float | None = None,  # training-time normalization std
 ) -> torch.Tensor:
     """
     Run PPR to reconstruct the full current field from sparse path observations.
@@ -54,9 +56,15 @@ def ppr(
         r:               RePaint resampling count (r=1 = no resampling)
         proj_iter:       POCS iteration count for joint_project
         device:          torch device string
-        projector:       "pocs" (only option for now)
+        projector:       "pocs"    = joint div-free + obs POCS projection (default).
+                         "snap_x0" = projection-free; snap observations only on the
+                                     clean x̂₀ estimate, relying on the model's
+                                     naturally div-free prior.
         inference_steps: number of denoising steps (default: full T).
                          E.g. 100 with T=1000 visits t=999,989,...,9 (every 10th).
+        data_mean:       normalization mean used at training (None = model runs in
+                         physical units, so the Tweedie clamp uses the raw [-1, 1] range)
+        data_std:        normalization std used at training (paired with data_mean)
 
     Returns:
         x0_pred: (2, H, W) reconstructed vector field (land pixels = 0,
@@ -64,6 +72,17 @@ def ppr(
     """
     model.eval()
     H, W = x0_known.shape[1:]
+
+    # Tweedie clamp bounds. The model may operate in *normalized* space; the
+    # physical data range [-1, 1] then maps to [(-1 - mean)/std, (1 - mean)/std].
+    # Clamping to the raw [-1, 1] here would strangle a normalized field (where a
+    # physical 0.33 ≈ +3.5), capping magnitudes and re-injecting clipping artifacts
+    # that the div-free projection cannot fully clean up.
+    if data_mean is not None and data_std is not None:
+        clamp_lo = (-1.0 - data_mean) / data_std
+        clamp_hi = ( 1.0 - data_mean) / data_std
+    else:
+        clamp_lo, clamp_hi = -1.0, 1.0
 
     # Move observations to device
     x0_known_t = x0_known.unsqueeze(0).to(device)        # (1, 2, H, W)
@@ -90,13 +109,26 @@ def ppr(
             # ---- 2. Tweedie: recover clean estimate x̂₀ ----
             ab     = diffusion.alpha_bar[t_int]
             x0_hat = (xt - (1.0 - ab).sqrt() * eps_hat) / ab.sqrt().clamp(min=1e-8)
-            x0_hat = x0_hat.clamp(-1.0, 1.0)
+            x0_hat = x0_hat.clamp(clamp_lo, clamp_hi)
 
-            # ---- 3. Joint projection onto {div-free ∩ matches observations} ----
-            x0_hat = joint_project(
-                x0_hat, ocean_mask, obs_mask, x0_known_t,
-                n_iter=proj_iter, projector=projector,
-            )
+            # ---- 3. Data-consistency projection on the clean estimate x̂₀ ----
+            if projector == "snap_x0":
+                # Projection-free variant: the model was trained on div-free data
+                # + div-free noise, so its unconditional prior is already nearly
+                # divergence-free (verified: uncond |div| ≈ GT |div|). Enforcing
+                # div-free again via POCS fights the prior and yields confident-
+                # but-wrong fields in unobserved regions. Here we only snap the
+                # observed cells on x̂₀ (gentle, clean-space data consistency —
+                # closer to DPS than RePaint's hard xₜ₋₁ injection) and let the
+                # model supply divergence-free structure everywhere else.
+                x0_hat = x0_hat.clone()
+                x0_hat[:, :, obs_mask] = x0_known_t[:, :, obs_mask]
+            else:
+                # Joint projection onto {div-free ∩ matches observations}
+                x0_hat = joint_project(
+                    x0_hat, ocean_mask, obs_mask, x0_known_t,
+                    n_iter=proj_iter, projector=projector,
+                )
             x0_hat = x0_hat * ocean_f
 
             # ---- 4. DDPM posterior: x_{t_prev} from projected x̂₀ ----

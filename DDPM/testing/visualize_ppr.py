@@ -121,6 +121,10 @@ def parse_args():
     p.add_argument("--resample",        type=int,   default=3,   help="RePaint resamples per step")
     p.add_argument("--ppr_resample",    type=int,   default=1,   help="PPR resamples per step (1 = single pass)")
     p.add_argument("--proj_iter",       type=int,   default=20)
+    p.add_argument("--projector",       default="pocs", choices=["pocs", "snap_x0"],
+                   help="PPR data-consistency mode: 'pocs' = joint div-free+obs "
+                        "projection; 'snap_x0' = projection-free obs snap on x0 "
+                        "(relies on the model's naturally div-free prior).")
     p.add_argument("--seed",            type=int,   default=42)
     p.add_argument("--T",               type=int,   default=1000)
     p.add_argument("--base_ch",         type=int,   default=64)
@@ -130,8 +134,6 @@ def parse_args():
                         "Must divide T evenly. E.g. 100 visits every 10th step of T=1000.")
     p.add_argument("--device",          default=None, help="cuda / mps / cpu (auto-detect if omitted)")
     p.add_argument("--out",             default="DDPM/best_model_results/ppr_comparison.png")
-    p.add_argument("--no_scale_uncond",  action="store_true",
-                   help="Skip amplitude-normalizing uncond sample to GT scale")
     return p.parse_args()
 
 
@@ -157,6 +159,7 @@ def main():
     test_ds      = OceanCurrentDataset(args.pickle, split=2)
     land_mask_np = test_ds.land_mask.numpy()       # (H, W) bool
     x0_true      = test_ds[args.sample]            # (2, H, W)
+    ocean_t      = torch.from_numpy(~land_mask_np)  # (H, W) bool, True = ocean
 
     # ---- Robot path ----
     path_mask = biased_walk_path(land_mask_np, n_steps=args.path_steps, seed=args.seed)
@@ -208,41 +211,33 @@ def main():
     print("└─────────────────────────────────────────┘")
     print()
 
-    # ---- Unconditioned DDPM sample ----
-    print(f"[1/3] Running unconditioned DDPM sample (inference_steps={args.inference_steps}) …")
-    t0 = time.time()
-    H, W = x0_true.shape[1:]
-    xt = diffusion._sample_noise(torch.zeros(1, 2, H, W, device=device))
-    schedule = diffusion.build_inference_schedule(args.inference_steps)
-    for t_int, t_prev_int in schedule:
-        xt = diffusion.p_sample_step(model, xt, t_int, t_prev_int)
-    x0_uncond_norm = xt.squeeze(0).cpu()
-    x0_uncond = (x0_uncond_norm * data_std + data_mean) if _normalize else x0_uncond_norm
-    # zero land cells
-    ocean_t = torch.from_numpy(~land_mask_np)
-    x0_uncond[:, ~ocean_t] = 0.0
-    print(f"      done in {time.time()-t0:.1f}s")
-
     # ---- RePaint ----
-    print(f"[2/3] Running RePaint  (T={T}, r={args.resample}) …")
+    print(f"[1/2] Running RePaint  (T={T}, r={args.resample}) …")
     t0 = time.time()
     x0_repaint_norm = repaint(
         model, diffusion, x0_obs_for_infer, path_mask, land_mask_np,
         r=args.resample, device=device, inference_steps=args.inference_steps,
     )
     x0_repaint = (x0_repaint_norm * data_std + data_mean) if _normalize else x0_repaint_norm
+    # Un-normalization maps land (0 → data_mean); re-zero so the constant offset
+    # does not contaminate the finite-difference divergence at coastline cells.
+    x0_repaint[:, ~ocean_t] = 0.0
     repaint_nan = x0_repaint.isnan().any().item()
     print(f"      done in {time.time()-t0:.1f}s  {'⚠ NaN detected!' if repaint_nan else 'OK'}")
 
     # ---- PPR ----
-    print(f"[3/3] Running PPR      (T={T}, r={args.ppr_resample}, proj_iter={args.proj_iter}) …")
+    print(f"[2/2] Running PPR      (T={T}, r={args.ppr_resample}, proj_iter={args.proj_iter}) …")
     t0 = time.time()
     x0_ppr_norm = ppr(
         model, diffusion, x0_obs_for_infer, path_mask, land_mask_np,
         r=args.ppr_resample, proj_iter=args.proj_iter, device=device,
         inference_steps=args.inference_steps,
+        data_mean=data_mean, data_std=data_std,
+        projector=args.projector,
     )
     x0_ppr = (x0_ppr_norm * data_std + data_mean) if _normalize else x0_ppr_norm
+    # Re-zero land cells (see RePaint note above) before metrics/divergence.
+    x0_ppr[:, ~ocean_t] = 0.0
     print(f"      done in {time.time()-t0:.1f}s")
 
     # ---- Metrics ----
@@ -251,7 +246,7 @@ def main():
     print("┌──────────────┬───────────┬───────────────┐")
     print("│  Method      │   RMSE    │  mean |div|   │")
     print("├──────────────┼───────────┼───────────────┤")
-    for name, pred in [("Uncond", x0_uncond), ("RePaint", x0_repaint), ("PPR", x0_ppr)]:
+    for name, pred in [("RePaint", x0_repaint), ("PPR", x0_ppr)]:
         u_p, v_p = pred[0].numpy(), pred[1].numpy()
         u_t, v_t = x0_true[0].numpy(), x0_true[1].numpy()
         rmse     = float(np.sqrt(((u_p-u_t)**2 + (v_p-v_t)**2)[ocean].mean()))
@@ -281,33 +276,21 @@ def main():
     v_ppr_d = _T(x0_ppr[1].numpy())
     div_ppr  = _T(_div_map(x0_ppr.numpy(), land_mask_np))
 
-    # Unconditioned — amplitude-scale to GT std for direction comparison
-    _oc = ~land_mask_np
-    _gt_std  = float(x0_true[:, _oc].std())
-    _unc_std = float(x0_uncond[:, _oc].std())
-    _unc_scale = (_gt_std / _unc_std) if (not args.no_scale_uncond and _unc_std > 1e-8) else 1.0
-    x0_uncond_disp = x0_uncond * _unc_scale  # scaled for quiver only
-    u_unc_d = _T(x0_uncond_disp[0].numpy())
-    v_unc_d = _T(x0_uncond_disp[1].numpy())
-    div_unc  = _T(_div_map(x0_uncond.numpy(), land_mask_np))
-
     # Shared divergence colorscale
     vmax = float(np.nanpercentile(div_rp, 99))
 
-    # ---- 2×4 Figure ----
-    fig, axes = plt.subplots(2, 4, figsize=(26, 10))
+    # ---- 2×3 Figure ----
+    fig, axes = plt.subplots(2, 3, figsize=(20, 10))
 
     # Row 0: quiver plots
     plot_field(axes[0, 0], u_true_d, v_true_d, land_d, "Ground Truth")
-    _scale_str = f" (×{_unc_scale:.2f} to GT amp)" if _unc_scale != 1.0 else ""
-    plot_field(axes[0, 1], u_unc_d,  v_unc_d,  land_d, f"DDPM (uncond{_scale_str})")
-    plot_field(axes[0, 2], u_rp_d,   v_rp_d,   land_d, "RePaint (hard snap)")
-    plot_field(axes[0, 3], u_ppr_d,  v_ppr_d,  land_d, "PPR (joint projection)")
+    plot_field(axes[0, 1], u_rp_d,   v_rp_d,   land_d, "RePaint")
+    plot_field(axes[0, 2], u_ppr_d,  v_ppr_d,  land_d, "PPR")
 
     # Mark robot path on RePaint panel
     path_disp = np.zeros_like(land_d, dtype=float)
     path_disp[path_d] = 1.0
-    axes[0, 2].imshow(
+    axes[0, 1].imshow(
         path_disp, origin="lower", cmap="Reds", alpha=0.5,
         extent=[-0.5, land_d.shape[1]-0.5, -0.5, land_d.shape[0]-0.5],
         aspect="auto", zorder=2,
@@ -315,13 +298,12 @@ def main():
 
     # Row 1: divergence heatmaps
     _div_panel(axes[1, 0], div_true, land_d, "|divergence| — Ground Truth", vmax=vmax)
-    _div_panel(axes[1, 1], div_unc,  land_d, "|divergence| — Unconditioned", vmax=vmax)
-    _div_panel(axes[1, 2], div_rp,   land_d, "|divergence| — RePaint",      vmax=vmax)
-    _div_panel(axes[1, 3], div_ppr,  land_d, "|divergence| — PPR",          vmax=vmax)
+    _div_panel(axes[1, 1], div_rp,   land_d, "|divergence| — RePaint",     vmax=vmax)
+    _div_panel(axes[1, 2], div_ppr,  land_d, "|divergence| — PPR",         vmax=vmax)
 
     fig.suptitle(
         f"Val sample {args.sample}, seed {args.seed}  |  "
-        f"T={T}, r={args.resample}, proj_iter={args.proj_iter}",
+        f"T={T}, r={args.resample}, proj_iter={args.proj_iter}, projector={args.projector}",
         fontsize=13,
     )
     plt.tight_layout()
