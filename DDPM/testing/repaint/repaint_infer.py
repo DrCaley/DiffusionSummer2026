@@ -65,8 +65,8 @@ def repaint(
     land_t  = torch.from_numpy(land_mask).float().to(device)[None, None]
     ocean_t = 1.0 - land_t
 
-    # Start from noise — type determined by the diffusion object
-    xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device))
+    # Start from noise — type and scale determined by the diffusion object
+    xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device)) * diffusion.noise_scale
     xt = xt * ocean_t  # land stays 0
 
     n_steps  = inference_steps if inference_steps is not None else diffusion.T

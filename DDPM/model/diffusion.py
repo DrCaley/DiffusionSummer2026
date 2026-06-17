@@ -8,10 +8,26 @@ import torch.nn.functional as F
 # ---------------------------------------------------------------------------
 # Load loss_functions.py from Model Parameters/ via importlib so this file
 # can be imported from any working directory.
+# Searches up to 3 levels above this file's location so the same diffusion.py
+# works both when installed under DDPM/model/ (local) and at the repo root
+# (remote server with flat structure).
 # ---------------------------------------------------------------------------
-_lf_path = os.path.join(
-    os.path.dirname(__file__), "..", "..", "Model Parameters", "loss_functions.py"
-)
+_lf_path = None
+for _up in range(4):
+    _candidate = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *(['..'] * _up),
+        "Model Parameters",
+        "loss_functions.py",
+    ))
+    if os.path.isfile(_candidate):
+        _lf_path = _candidate
+        break
+if _lf_path is None:
+    raise FileNotFoundError(
+        "Cannot locate loss_functions.py under any Model Parameters/ "
+        "directory relative to diffusion.py"
+    )
 _lf_spec = importlib.util.spec_from_file_location(
     "loss_functions", os.path.abspath(_lf_path)
 )
@@ -47,13 +63,16 @@ class DDPM:
 
     Loss modes (set via loss_types):
         eps          Pure epsilon-MSE only (default).
-        curl_div     + curl/divergence penalty on reconstructed x̂₀.
-        spectral     + FFT power-spectrum penalty on reconstructed x̂₀.
-        okubo_weiss  + Okubo-Weiss eddy-structure penalty.
-        wasserstein  + Sinkhorn-Wasserstein vorticity distance (needs geomloss).
+        curl_div     curl/divergence penalty on reconstructed x̂₀.
+        spectral     FFT power-spectrum penalty on reconstructed x̂₀.
+        okubo_weiss  Okubo-Weiss eddy-structure penalty.
+        wasserstein  Sinkhorn-Wasserstein vorticity distance (needs geomloss).
+        stream_function  stream-function (Poisson-solve) penalty.
+        strain_rate  strain-rate tensor invariants penalty.
 
     Multiple modes can be combined: loss_types=["spectral", "okubo_weiss"].
-    Each has its own independent weight from the weights dict.
+    Omitting "eps" trains with *only* the auxiliary losses (no MSE term).
+    Each auxiliary loss has its own independent weight from the weights dict.
     """
 
     def __init__(
@@ -66,9 +85,11 @@ class DDPM:
         weights:            dict[str, float] | None  = None,
         sinkhorn_blur:      float                    = 0.05,
         spectral_filter:    torch.Tensor | None      = None,
+        noise_scale:        float                    = 1.0,
     ):
-        self.T      = T
-        self.device = device
+        self.T           = T
+        self.device      = device
+        self.noise_scale = noise_scale
 
         if noise_type not in NOISE_TYPES:
             raise ValueError(f"noise_type must be one of {NOISE_TYPES}, got '{noise_type}'")
@@ -160,9 +181,9 @@ class DDPM:
         t:     torch.Tensor,
         noise: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Sample x_t ~ q(x_t | x_0) = N(sqrt(ᾱ_t)*x0, (1-ᾱ_t)*I)."""
+        """Sample x_t ~ q(x_t | x_0) = N(sqrt(ᾱ_t)*x0, (1-ᾱ_t)*noise_scale²*I)."""
         if noise is None:
-            noise = self._sample_noise(x0)
+            noise = self._sample_noise(x0) * self.noise_scale
         sqrt_ab  = self.sqrt_ab[t][:, None, None, None]
         sqrt_mab = self.sqrt_one_mab[t][:, None, None, None]
         return sqrt_ab * x0 + sqrt_mab * noise, noise
@@ -223,8 +244,14 @@ class DDPM:
                 indiv[lt] = _lf_mod.wasserstein_loss(
                     x0_pred, x0, ocean, self._sinkhorn
                 )
+            elif lt == "stream_function":
+                indiv[lt] = _lf_mod.stream_function_loss(x0_pred, x0, ocean)
+            elif lt == "strain_rate":
+                indiv[lt] = _lf_mod.strain_rate_loss(x0_pred, x0, ocean)
 
-        total = eps_loss + sum(self.weights[lt] * v for lt, v in indiv.items())
+        aux_total = sum(self.weights[lt] * v for lt, v in indiv.items())
+        # Only add epsilon-MSE when "eps" is explicitly listed
+        total = (eps_loss + aux_total) if "eps" in self.loss_types else aux_total
         return total, eps_loss, indiv
 
     # ------------------------------------------------------------------
@@ -286,9 +313,9 @@ class DDPM:
 
         ab  = self.alpha_bar[t_int]
 
-        # Predicted x0 (clipped for stability)
+        # Predicted x0 — clamp to ±3σ of the data (noise_scale ≈ data std)
         x0_pred = (xt - (1.0 - ab).sqrt() * pred_noise) / ab.sqrt()
-        x0_pred = x0_pred.clamp(-1.0, 1.0)
+        x0_pred = x0_pred.clamp(-3.0 * self.noise_scale, 3.0 * self.noise_scale)
 
         if t_prev_int < 0:
             return x0_pred
@@ -307,7 +334,7 @@ class DDPM:
         coef2 = (ab / ab_prev).sqrt() * (1.0 - ab_prev) / (1.0 - ab)
         mean  = coef1 * x0_pred + coef2 * xt
 
-        return mean + var.sqrt() * self._sample_noise(xt)
+        return mean + var.sqrt() * self.noise_scale * self._sample_noise(xt)
 
     # ------------------------------------------------------------------
     # Forward jump  q(x_t | x_{t_prev})  — used by RePaint resampling
@@ -324,12 +351,11 @@ class DDPM:
         Works for arbitrary (non-consecutive) step pairs.
 
         x_t = sqrt(ᾱ_t / ᾱ_{t_prev}) * x_{t_prev}
-              + sqrt(1 - ᾱ_t / ᾱ_{t_prev}) * eps
+              + sqrt(1 - ᾱ_t / ᾱ_{t_prev}) * noise_scale * eps
         """
-        ab_t    = self.alpha_bar[t_int]
+        ab_t = self.alpha_bar[t_int]
         if t_prev_int < 0:
-            # Going from x̂₀ (ᾱ=1) to x_t
-            return ab_t.sqrt() * x_prev + (1.0 - ab_t).sqrt() * self._sample_noise(x_prev)
+            return ab_t.sqrt() * x_prev + (1.0 - ab_t).sqrt() * self.noise_scale * self._sample_noise(x_prev)
         ab_prev = self.alpha_bar[t_prev_int]
         ratio   = ab_t / ab_prev
-        return ratio.sqrt() * x_prev + (1.0 - ratio).sqrt() * self._sample_noise(x_prev)
+        return ratio.sqrt() * x_prev + (1.0 - ratio).sqrt() * self.noise_scale * self._sample_noise(x_prev)

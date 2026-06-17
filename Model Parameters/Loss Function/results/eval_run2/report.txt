@@ -1,0 +1,131 @@
+================================================================================================================
+  LOSS FUNCTION MODEL EVALUATION RESULTS  —  RUN 2
+  6 models (spectral removed)  x  10 random validation samples  (val set size: 1965)
+  Metrics evaluated: RMSE (field), Spectral RMSE, Wasserstein distance
+  Samples : [348, 990, 1003, 1107, 1208, 1483, 1848, 1874, 1895, 1908]
+  Path steps: 150   Resample (r): 10   RNG seed: 99
+================================================================================================================
+
+  TABLE 1 -- Mean metric values across 10 samples  (lower = better)
+
+  Model              RMSE (field)   Spectral RMSE   Wasserstein dist.
+  -------------------------------------------------------------------
+  eps                     0.09624         21.421             0.04625
+  curl_div                0.10288         30.002             0.04950
+  okubo_weiss             0.12957         48.455             0.06612
+  wasserstein             0.10585         41.521             0.06227
+  stream_function         0.11060         38.128             0.07163
+  strain_rate             0.16659         62.104             0.06906
+
+  Standard deviations (sigma across 10 samples):
+
+  Model              RMSE (field)   Spectral RMSE   Wasserstein dist.
+  -------------------------------------------------------------------
+  eps                     0.04249         15.446             0.03224
+  curl_div                0.09226         28.476             0.03703
+  okubo_weiss             0.09933         45.762             0.02503
+  wasserstein             0.06723         39.279             0.04105
+  stream_function         0.04085         23.133             0.03314
+  strain_rate             0.12124         58.665             0.03601
+
+================================================================================================================
+  TABLE 2 -- Best model per metric  (ranked by mean over 10 samples)
+
+  Metric               Best Model          Mean Value    2nd Best            Mean Value
+  --------------------------------------------------------------------------------------
+  RMSE (field)         eps                   0.096241    curl_div              0.102877
+  Spectral RMSE        eps                  21.420531    curl_div             30.002206
+  Wasserstein dist.    eps                   0.046249    curl_div              0.049505
+
+  Notes:
+  - eps model wins all 3 metrics on this sample set
+  - curl_div is consistently 2nd best across all 3 metrics
+  - strain_rate performs worst on RMSE and Spectral (highest values + highest variance)
+  - okubo_weiss and wasserstein models both show high variance, suggesting inconsistency
+  - This contrasts with Run 1 (seed 42) where strain_rate won 5/7 metrics — sample set matters
+
+================================================================================================================
+  TABLE 3 -- Per-sample RMSE (field) for each model
+             Values in [brackets] = best model for that sample
+
+  Sample      Seed         eps      curl_div   okubo_weiss   wasserstein   stream_fn    strain_rate
+  --------------------------------------------------------------------------------------------------
+     348     61005      0.10764      0.08095       0.12592     [0.06006]       0.03477       0.09788
+     990     34271     [0.08488]     0.09049       0.18588       0.15285       0.06770       0.24570
+    1003     93043     [0.07505]     0.37327       0.40649       0.12858       0.15373       0.46723
+    1107     30007      0.18239    [0.04428]       0.11857       0.28351       0.11527       0.07012
+    1208     24588      0.07283      0.07469       0.06674       0.04388       0.08984     [0.04241]
+    1483     60250      0.16725      0.09657       0.09159     [0.08202]       0.16987       0.07891
+    1848     30943     [0.06626]     0.10024       0.10681       0.10134       0.08063       0.20320
+    1874     34315      0.05100    [0.03739]       0.05697       0.08110       0.11878       0.14834
+    1895     39107      0.09612    [0.06405]       0.06999       0.05860       0.15810       0.08081
+    1908     68829     [0.05901]     0.06683       0.06673       0.06658       0.11736       0.23129
+
+  Win count (best RMSE per sample):
+    eps: 4   curl_div: 3   okubo_weiss: 0   wasserstein: 2   stream_function: 1   strain_rate: 0
+
+================================================================================================================
+  TABLE 4 -- Per-sample Spectral RMSE for each model
+             Values in [brackets] = best model for that sample
+
+  Sample      Seed         eps      curl_div   okubo_weiss   wasserstein   stream_fn    strain_rate
+  --------------------------------------------------------------------------------------------------
+     348     61005       56.937      15.922       15.847       [9.399]        3.151       21.697
+     990     34271      [23.412]     36.339      139.890      118.959        17.375       98.003
+    1003     93043      [18.520]     98.763      126.232      105.493        82.741      205.079
+    1107     30007       13.964      [6.438]      48.381       63.489        41.104       12.968
+    1208     24588       12.563      11.775        5.124       [4.118]       25.450        4.882
+    1483     60250       43.801      61.587       51.874       42.647        60.749      [24.140]
+    1848     30943      [10.358]     37.217       53.965       28.237        12.400       56.531
+    1874     34315      [5.409]       4.059        7.642       15.343        35.427       98.867
+    1895     39107       12.926      [11.008]      16.521       10.451        52.481       16.131
+    1908     68829      [16.316]     16.915       19.072       17.076        50.404       82.747
+
+  Win count (best spectral per sample):
+    eps: 5   curl_div: 2   okubo_weiss: 0   wasserstein: 2   stream_function: 1   strain_rate: 0
+
+================================================================================================================
+  TABLE 5 -- Per-sample Wasserstein distance for each model
+             Values in [brackets] = best model for that sample
+
+  Sample      Seed         eps      curl_div   okubo_weiss   wasserstein   stream_fn    strain_rate
+  --------------------------------------------------------------------------------------------------
+     348     61005      [0.00977]    0.13382      0.06357       0.03259       0.03022       0.14381
+     990     34271       0.04503    [0.02477]     0.05669       0.06490       0.01974       0.08841
+    1003     93043      [0.02659]    0.04084      0.03712       0.03517       0.05179       0.04721
+    1107     30007       0.11276      0.04756      0.07954       0.11890       0.05578     [0.00966]
+    1208     24588       0.04630      0.04797      0.04682       0.09065       0.06310     [0.05085]
+    1483     60250      [0.04068]    0.10333      0.08769       0.07578       0.08358       0.07632
+    1848     30943      [0.01436]    0.01696      0.05019       0.01666       0.12273       0.05343
+    1874     34315       0.06326    [0.01262]     0.04895       0.02033       0.11457       0.10286
+    1895     39107       0.08961     0.04007      0.12739      [0.02792]      0.10690       0.03640
+    1908     68829      [0.01414]    0.02710      0.06326       0.13981       0.06786       0.08168
+
+  Win count (best wasserstein per sample):
+    eps: 5   curl_div: 2   okubo_weiss: 0   wasserstein: 1   stream_function: 1   strain_rate: 1
+
+================================================================================================================
+  COMPARISON WITH RUN 1  (seed 42, 7 models, 7 metrics)
+  -------------------------------------------------------
+  Run 1 samples : [168, 174, 185, 395, 848, 859, 1281, 1368, 1514, 1683]
+  Run 2 samples : [348, 990, 1003, 1107, 1208, 1483, 1848, 1874, 1895, 1908]
+
+  Mean RMSE comparison (eps/spectral/wasserstein only):
+
+  Model              Run1 RMSE   Run2 RMSE   Run1 Spec   Run2 Spec   Run1 Wass   Run2 Wass
+  ------------------------------------------------------------------------------------------
+  eps                  0.08367     0.09624     31.286      21.421      0.08048     0.04625
+  curl_div             0.06991     0.10288     21.976      30.002      0.07850     0.04950
+  okubo_weiss          0.09730     0.12957     24.554      48.455      0.04052     0.06612
+  wasserstein          0.09660     0.10585     39.736      41.521      0.09290     0.06227
+  stream_function      0.08467     0.11060     29.966      38.128      0.07352     0.07163
+  strain_rate          0.06744     0.16659     21.277      62.104      0.07511     0.06906
+
+  Key observations:
+  - eps model performs consistently well across both runs
+  - curl_div model was best in Run 1 but degrades notably in Run 2
+  - strain_rate model performs well in Run 1 but very poorly in Run 2 (highest variance)
+  - No single model dominates across both runs, suggesting high sample-to-sample variance
+  - The spectral-trained model (excluded from Run 2) was the worst performer in Run 1
+
+================================================================================================================

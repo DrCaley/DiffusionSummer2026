@@ -45,7 +45,10 @@ def parse_args():
                    help="Per-loss weights, one per non-eps entry in --loss "
                         "(in the same order). Omit to use defaults.")
     p.add_argument("--sinkhorn_blur", type=float, default=0.05)
-    p.add_argument("--save_dir", default="checkpoints")
+    p.add_argument("--noise_scale", type=float, default=1.0,
+                   help="Std dev of the Gaussian noise in the forward process. "
+                        "Set to ~0.12 to match the data scale (default: 1.0 = standard DDPM).")
+    p.add_argument("--save_dir", default="models")
     p.add_argument("--workers",  type=int,   default=0)
     p.add_argument("--spectral_filter", default=None,
                    help="Path to spectral_filter.npy for colored div-free noise. "
@@ -129,14 +132,17 @@ def main():
         weights=weights,
         sinkhorn_blur=args.sinkhorn_blur,
         spectral_filter=spec_filter_tensor,
+        noise_scale=args.noise_scale,
     )
+    print(f"Noise scale: {args.noise_scale}")
 
     # ---- Optimiser ----
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
     # ---- Run tag: ddpm_{losses}_{noise_type}_{schedule} ----
-    run_tag = f"ddpm_{'+'.join(args.loss)}_{args.noise_type}_{args.schedule}"
+    ns_tag  = f"_ns{args.noise_scale:.2f}".replace(".", "p") if args.noise_scale != 1.0 else ""
+    run_tag = f"ddpm_{'+'.join(args.loss)}_{args.noise_type}_{args.schedule}{ns_tag}"
 
     # ---- Training loop ----
     best_val  = float("inf")
