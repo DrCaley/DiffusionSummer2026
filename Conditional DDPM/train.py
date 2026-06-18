@@ -54,17 +54,19 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------------------------
 _here      = os.path.dirname(os.path.abspath(__file__))
 _repo_root = os.path.normpath(os.path.join(_here, ".."))
+_testing_dir       = os.path.join(_here, "testing")
+_utils_dir         = os.path.join(_repo_root, "utils")
 _voronoi_model_dir = os.path.join(_repo_root, "Voronoi", "model")
 
-sys.path.insert(0, _here)            # Conditional DDPM/  (model.py, diffusion.py)
-sys.path.insert(0, _repo_root)       # workspace root     (dataset.py, paths.py)
-sys.path.insert(0, _voronoi_model_dir)  # Voronoi/model/  (voronoi_model.py)
+sys.path.insert(0, _testing_dir)        # Conditional DDPM/testing/ (cond_model.py, cond_diffusion.py)
+sys.path.insert(0, _utils_dir)          # utils/ (dataset.py, paths.py)
+sys.path.insert(0, _voronoi_model_dir)  # Voronoi/model/ (voronoi_model.py)
 
 from dataset        import OceanCurrentDataset
 from paths          import biased_walk_path, basic_robot_path
 from voronoi_model  import VoronoiLayer
 from cond_model     import CondUNet
-from cond_diffusion import CondDDPM
+from cond_diffusion import CondDDPM, NOISE_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +181,15 @@ def parse_args():
     p.add_argument("--noise_scale", type=float, default=1.0,
                    help="Std of forward-process noise (set to ~0.12 to match data scale).")
     p.add_argument("--schedule",   default="cosine", choices=["cosine", "linear"])
+    p.add_argument("--noise_type", default="gaussian", choices=list(NOISE_TYPES),
+                   help="Forward-process noise: 'gaussian' or 'div_free' "
+                        "(divergence-free colored noise, the new pipeline).")
+    p.add_argument("--spectral_filter", default=None,
+                   help="Path to spectral_filter.npy for colored div-free noise. "
+                        "Only used when --noise_type div_free.")
+    p.add_argument("--normalize", action="store_true",
+                   help="Normalize data to unit std (ocean cells) before training. "
+                        "Saves data_mean/data_std into the checkpoint.")
     p.add_argument("--path_steps", type=int,   default=150,
                    help="Number of biased-walk steps for sensor path generation.")
     p.add_argument("--path_fn",    default="biased_walk", choices=["biased_walk", "basic_robot"],
@@ -207,13 +218,22 @@ def main():
     print(f"Device       : {device}")
     print(f"Cond mode    : {args.cond}  ({cond_in_ch} conditioning channels)")
     print(f"Schedule     : {args.schedule}")
+    print(f"Noise type   : {args.noise_type}")
     print(f"Path steps   : {args.path_steps}")
     print(f"Save dir     : {args.save_dir}")
     os.makedirs(args.save_dir, exist_ok=True)
 
     # ---- Data ----------------------------------------------------------------
-    train_ds     = OceanCurrentDataset(args.pickle, split=0)
-    val_ds       = OceanCurrentDataset(args.pickle, split=1)
+    if args.normalize:
+        data_mean, data_std = OceanCurrentDataset.compute_stats(args.pickle, split=0)
+        print(f"Normalizing data: mean={data_mean:.5f}  std={data_std:.5f}")
+    else:
+        data_mean = data_std = None
+
+    train_ds     = OceanCurrentDataset(args.pickle, split=0,
+                                       data_mean=data_mean, data_std=data_std)
+    val_ds       = OceanCurrentDataset(args.pickle, split=1,
+                                       data_mean=data_mean, data_std=data_std)
     land_mask    = train_ds.land_mask.to(device)
     land_mask_np = train_ds.land_mask.numpy()
     H, W = train_ds.data.shape[2], train_ds.data.shape[3]
@@ -245,15 +265,26 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model params : {n_params:,}")
 
+    # ---- Optional spectral filter for colored div-free noise -----------------
+    spec_filter_tensor = None
+    if args.spectral_filter:
+        spec_filter_tensor = torch.from_numpy(
+            np.load(args.spectral_filter).astype(np.float32)
+        )
+        print(f"Spectral filter: {args.spectral_filter}  "
+              f"shape={tuple(spec_filter_tensor.shape)}")
+
     # ---- Diffusion -----------------------------------------------------------
     diffusion = CondDDPM(T=args.T, beta_schedule=args.schedule, device=device,
-                         noise_scale=args.noise_scale)
+                         noise_scale=args.noise_scale,
+                         noise_type=args.noise_type,
+                         spectral_filter=spec_filter_tensor)
 
     # ---- Optimiser -----------------------------------------------------------
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
-    run_tag  = f"cond_ddpm_{args.cond}_{args.schedule}"
+    run_tag  = f"cond_ddpm_{args.cond}_{args.noise_type}_{args.schedule}"
     best_val = float("inf")
 
     # ---- Training loop -------------------------------------------------------
@@ -305,6 +336,9 @@ def main():
                     "model":    model.state_dict(),
                     "val_loss": val_loss,
                     "args":     vars(args),
+                    "spectral_filter": diffusion.spectral_filter,
+                    "data_mean": data_mean,
+                    "data_std":  data_std,
                 },
                 os.path.join(args.save_dir, f"best_{run_tag}.pt"),
             )

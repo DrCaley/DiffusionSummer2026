@@ -30,7 +30,7 @@ for _p in [_root, os.path.join(_root, "utils"), _model, _repaint, _ppr]:
 from dataset              import OceanCurrentDataset
 from diffusion            import DDPM
 from model                import UNet
-from divfree_projection   import divergence as compute_divergence
+from divfree_projection   import divergence as compute_divergence, joint_project
 from repaint_infer        import biased_walk_path, repaint
 from ppr_infer            import ppr
 
@@ -88,7 +88,7 @@ def _ke_spectrum_error(pred_np: np.ndarray, true_np: np.ndarray,
 # ---------------------------------------------------------------------------
 
 def _run_one(model, diffusion, val_ds, land_mask_np, sample_idx, seed, args, device,
-             method: str, data_mean=None, data_std=None):
+             method: str, clim=None, data_mean=None, data_std=None):
     x0_true = val_ds[sample_idx]                       # (2, H, W) clean field
     path_mask = biased_walk_path(land_mask_np, n_steps=args.path_steps, seed=seed)
 
@@ -108,8 +108,20 @@ def _run_one(model, diffusion, val_ds, land_mask_np, sample_idx, seed, args, dev
         x0_pred_norm = ppr(
             model, diffusion, x0_obs_infer, path_mask, land_mask_np,
             r=args.ppr_resample, proj_iter=args.proj_iter, device=device,
-            inference_steps=args.inference_steps,
+            inference_steps=args.inference_steps, projector=args.projector,
+            data_mean=data_mean, data_std=data_std,
         )
+
+    # Optional post-hoc data-consistency projection (applied ONCE to the final
+    # prediction). Cleans the divergence seam without the per-step energy drift
+    # of in-loop PPR. n_iter=0 = off. Operates in the model's (normalized) space.
+    if args.final_project > 0:
+        ocean_mask_t = torch.from_numpy(~land_mask_np)
+        obs_mask_t   = torch.from_numpy(path_mask)
+        x0_pred_norm = joint_project(
+            x0_pred_norm.unsqueeze(0), ocean_mask_t, obs_mask_t,
+            x0_obs_infer.unsqueeze(0), n_iter=args.final_project,
+        ).squeeze(0)
 
     # Denormalize prediction back to original units
     x0_pred = (x0_pred_norm * data_std + data_mean) if _normalize else x0_pred_norm
@@ -127,10 +139,27 @@ def _run_one(model, diffusion, val_ds, land_mask_np, sample_idx, seed, args, dev
     div          = compute_divergence(x0_pred_t, ocean_mask_t)  # (1, H, W)
     mean_div     = float(div[0][ocean_mask_t].abs().mean().item())
 
+    # --- Anomaly metrics (true flow-structure skill, DC-offset removed) ---
+    # The raw speed ratio is fooled by the data mean: a blank normalized field
+    # denormalizes to a constant offset with nonzero "speed" (~climatology).
+    # Subtracting the climatology field isolates the per-sample FLUCTUATION that
+    # the model must actually reconstruct.
+    #   AnomRatio = RMS(pred anomaly) / RMS(true anomaly)  (~1 = right energy)
+    #   ACC       = anomaly correlation coeff pred vs true (1 = perfect pattern,
+    #               0 = no skill / climatology, <0 = anti-correlated)
+    if clim is not None:
+        pa = (x0_pred.numpy() - clim)[:, ocean].reshape(-1)   # (2*n_ocean,)
+        ta = (x0_true.numpy() - clim)[:, ocean].reshape(-1)
+        anom_ratio = float(np.sqrt((pa ** 2).mean()) / (np.sqrt((ta ** 2).mean()) + 1e-12))
+        denom      = np.sqrt((pa ** 2).sum()) * np.sqrt((ta ** 2).sum()) + 1e-12
+        acc        = float((pa * ta).sum() / denom)
+    else:
+        anom_ratio, acc = float("nan"), float("nan")
+
     # --- Spectral error ---
     low_err, high_err = _ke_spectrum_error(x0_pred.numpy(), x0_true.numpy(), land_mask_np)
 
-    return rmse, mean_div, low_err, high_err, int(path_mask.sum())
+    return rmse, mean_div, anom_ratio, acc, low_err, high_err, int(path_mask.sum())
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +177,16 @@ def parse_args():
     p.add_argument("--resample",     type=int, default=10, help="RePaint resamples per step")
     p.add_argument("--ppr_resample", type=int, default=1,  help="PPR resamples per step (1 = single pass)")
     p.add_argument("--proj_iter",    type=int, default=20, help="POCS iterations")
+    p.add_argument("--projector",    default="pocs", choices=["pocs", "snap_x0"],
+                   help="PPR data-consistency projector (pocs = joint div-free+obs; snap_x0 = obs-only on x0-hat)")
+    p.add_argument("--final_project", type=int, default=0,
+                   help="POCS iters applied ONCE to the final prediction (0=off). "
+                        "Cleans divergence post-hoc without per-step energy drift.")
+    p.add_argument("--methods", nargs="+", default=["repaint", "ppr"],
+                   choices=["repaint", "ppr"], help="which methods to run")
+    p.add_argument("--random", action="store_true",
+                   help="draw n_runs random distinct val samples (seeded by --seed) instead of 0,1,2,...")
+    p.add_argument("--seed", type=int, default=1234, help="RNG seed for --random sample selection")
     p.add_argument("--T",            type=int, default=1000)
     p.add_argument("--base_ch",      type=int, default=64)
     p.add_argument("--time_dim",     type=int, default=256)
@@ -204,51 +243,81 @@ def main():
     diffusion = DDPM(T=T, beta_schedule="cosine", device=device, noise_type=noise_type,
                      spectral_filter=spectral_filter)
 
-    # ---- Run both methods ----
+    # ---- Sample indices (random distinct, or sequential) ----
+    if args.random:
+        rng         = np.random.default_rng(args.seed)
+        sample_idxs = rng.choice(len(val_ds), size=min(args.n_runs, len(val_ds)),
+                                 replace=False).tolist()
+    else:
+        sample_idxs = [i % len(val_ds) for i in range(args.n_runs)]
+    print(f"Val samples ({'random' if args.random else 'sequential'}): {sample_idxs}")
+
+    # ---- Climatology baseline (train-mean field) for skill reference ----
+    train_ds = OceanCurrentDataset(args.pickle, split=0)
+    ocean    = ~land_mask_np
+    clim     = train_ds.data.mean(dim=0).numpy()      # (2, H, W)
+    clim[:, ~ocean] = 0.0
+
+    # ---- Run methods ----
     results = {"repaint": [], "ppr": []}
 
     header = f"{'Run':>4}  {'Sample':>7}  {'Seed':>6}  {'Cells':>6}  " \
-             f"{'RMSE':>8}  {'|div|':>9}  {'SpecLo':>8}  {'SpecHi':>8}"
+             f"{'RMSE':>8}  {'|div|':>9}  {'AnomRat':>8}  {'ACC':>7}  {'SpecLo':>8}  {'SpecHi':>8}"
 
-    for method in ("repaint", "ppr"):
-        print(f"\n{'=' * 70}")
+    clim_rmses = []
+    for method in args.methods:
+        print(f"\n{'=' * 88}")
         print(f"  Method: {method.upper()}")
-        print(f"{'=' * 70}")
+        print(f"{'=' * 88}")
         print(header)
 
-        for i in range(args.n_runs):
-            sample_idx = i % len(val_ds)
+        for i, sample_idx in enumerate(sample_idxs):
             seed       = i * 7 + 1
 
-            rmse, mean_div, low_err, high_err, path_cells = _run_one(
+            rmse, mean_div, anom_ratio, acc, low_err, high_err, path_cells = _run_one(
                 model, diffusion, val_ds, land_mask_np,
-                sample_idx, seed, args, device, method,
+                sample_idx, seed, args, device, method, clim=clim,
                 data_mean=data_mean, data_std=data_std,
             )
-            results[method].append((rmse, mean_div, low_err, high_err))
+            results[method].append((rmse, mean_div, anom_ratio, acc, low_err, high_err))
+
+            if method == args.methods[0]:
+                gt        = val_ds[sample_idx].numpy()
+                cr        = float(np.sqrt((((clim - gt) ** 2).sum(0))[ocean].mean()))
+                clim_rmses.append(cr)
 
             print(
                 f"{i+1:>4}  {sample_idx:>7}  {seed:>6}  {path_cells:>6}  "
-                f"{rmse:>8.4f}  {mean_div:>9.6f}  {low_err:>8.4f}  {high_err:>8.4f}"
+                f"{rmse:>8.4f}  {mean_div:>9.6f}  {anom_ratio:>8.3f}  {acc:>7.3f}  "
+                f"{low_err:>8.4f}  {high_err:>8.4f}"
             )
 
     # ---- Summary table ----
-    print(f"\n{'=' * 70}")
-    print(f"  SUMMARY  ({args.n_runs} runs each)")
-    print(f"{'=' * 70}")
-    row_fmt = f"  {{:<10}}  {{:>8}}  {{:>8}}  {{:>9}}  {{:>8}}  {{:>8}}"
-    print(row_fmt.format("Method", "RMSE", "Std", "|div|", "SpecLo", "SpecHi"))
-    print(f"  {'-'*64}")
+    print(f"\n{'=' * 88}")
+    print(f"  SUMMARY  ({len(sample_idxs)} runs each)")
+    print(f"{'=' * 88}")
+    row_fmt = f"  {{:<11}}  {{:>8}}  {{:>8}}  {{:>9}}  {{:>8}}  {{:>7}}  {{:>8}}  {{:>8}}"
+    print(row_fmt.format("Method", "RMSE", "Std", "|div|", "AnomRat", "ACC", "SpecLo", "SpecHi"))
+    print(f"  {'-'*82}")
 
-    for method in ("repaint", "ppr"):
-        arr = np.array(results[method])        # (N, 4)
-        rmse_m, div_m, lo_m, hi_m = arr.mean(0)
-        rmse_s                     = arr[:, 0].std()
+    for method in args.methods:
+        arr = np.array(results[method])        # (N, 6)
+        rmse_m, div_m, anom_m, acc_m, lo_m, hi_m = arr.mean(0)
+        rmse_s                                   = arr[:, 0].std()
         print(row_fmt.format(
             method,
             f"{rmse_m:.4f}", f"{rmse_s:.4f}",
-            f"{div_m:.6f}", f"{lo_m:.4f}", f"{hi_m:.4f}",
+            f"{div_m:.6f}", f"{anom_m:.3f}", f"{acc_m:.3f}", f"{lo_m:.4f}", f"{hi_m:.4f}",
         ))
+
+    # Climatology baseline = trivial 'predict train-mean field' (ignores observations).
+    # By construction climatology has AnomRat=0 and ACC=0 (it IS the anomaly origin).
+    clim_m = float(np.mean(clim_rmses))
+    print(row_fmt.format(
+        "climatology", f"{clim_m:.4f}", "-", "-", "0.000", "0.000", "-", "-"))
+    print(f"\n  AnomRat = anomaly-RMS / true-anomaly-RMS (DC-offset removed; ~1 = right energy).")
+    print(f"  ACC     = anomaly pattern correlation vs GT (1 = perfect, 0 = climatology, <0 = worse).")
+    print(f"  REAL skill needs RMSE < climatology ({clim_m:.4f}) AND ACC > 0 (positive pattern match).")
 
     print()
 

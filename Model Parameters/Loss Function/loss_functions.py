@@ -7,6 +7,10 @@ on top of the base epsilon-MSE loss.
 
 Available loss modes (LOSS_MODES):
     eps               Pure epsilon-MSE only — no auxiliary term.
+    angle             Directional (cosine) loss on x̂₀ — penalises only the
+                      angle between predicted and true velocity vectors,
+                      ignoring magnitude.  Use alone (--loss angle) to train a
+                      pure flow-direction model.
     curl_div          MSE between curl and divergence fields of x̂₀ and x₀.
     spectral          MSE between FFT power spectra of x̂₀ and x₀.
     okubo_weiss       MSE between Okubo-Weiss parameters of x̂₀ and x₀.
@@ -30,11 +34,12 @@ import torch
 import torch.nn.functional as F
 
 LOSS_MODES = (
-    "eps", "curl_div", "spectral", "okubo_weiss", "wasserstein",
+    "eps", "angle", "curl_div", "spectral", "okubo_weiss", "wasserstein",
     "stream_function", "strain_rate",
 )
 
 DEFAULT_WEIGHTS: dict[str, float] = {
+    "angle":           1.0,
     "curl_div":        0.002,
     "spectral":        0.000002,
     "okubo_weiss":     0.0000001,
@@ -295,3 +300,33 @@ def wasserstein_loss(
         w_true.squeeze(-1).cpu().float(), coords_true.cpu().float(),
     )
     return dist.mean()
+
+
+def angle_loss(
+    pred:  torch.Tensor,
+    true:  torch.Tensor,
+    ocean: torch.Tensor,
+    eps:   float = 1e-8,
+) -> torch.Tensor:
+    """
+    Directional (cosine) loss between predicted and true velocity vectors.
+
+    Penalises only the *angle* between the (u, v) vectors at each ocean cell;
+    vector magnitude is ignored.  Defined as the mean of (1 - cosθ) over ocean
+    cells, where cosθ is the cosine similarity between the predicted and true
+    vectors.  0 = perfect direction match, 1 = orthogonal, 2 = exactly opposed.
+
+    Args:
+        pred, true: (B, 2, H, W) vector fields
+        ocean:      (1, 1, H, W) float mask (1 = ocean, 0 = land)
+        eps:        denominator floor to avoid division by zero at still cells
+    """
+    dot       = (pred * true).sum(dim=1, keepdim=True)           # (B, 1, H, W)
+    pred_norm = pred.norm(dim=1, keepdim=True)                   # (B, 1, H, W)
+    true_norm = true.norm(dim=1, keepdim=True)
+    cos       = dot / (pred_norm * true_norm + eps)
+    cos       = cos.clamp(-1.0, 1.0)
+
+    per_cell  = (1.0 - cos) * ocean                              # (B, 1, H, W)
+    denom     = ocean.sum() * pred.shape[0] + eps
+    return per_cell.sum() / denom

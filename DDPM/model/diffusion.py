@@ -13,15 +13,24 @@ import torch.nn.functional as F
 # (remote server with flat structure).
 # ---------------------------------------------------------------------------
 _lf_path = None
+# Search for loss_functions.py at several relative depths. It may live directly
+# under "Model Parameters/" (older layout) or under the "Loss Function/"
+# subfolder (after the repo reorganisation).
+_lf_subpaths = (
+    ("Model Parameters", "loss_functions.py"),
+    ("Model Parameters", "Loss Function", "loss_functions.py"),
+)
 for _up in range(4):
-    _candidate = os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        *(['..'] * _up),
-        "Model Parameters",
-        "loss_functions.py",
-    ))
-    if os.path.isfile(_candidate):
-        _lf_path = _candidate
+    for _sub in _lf_subpaths:
+        _candidate = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            *(['..'] * _up),
+            *_sub,
+        ))
+        if os.path.isfile(_candidate):
+            _lf_path = _candidate
+            break
+    if _lf_path is not None:
         break
 if _lf_path is None:
     raise FileNotFoundError(
@@ -63,6 +72,9 @@ class DDPM:
 
     Loss modes (set via loss_types):
         eps          Pure epsilon-MSE only (default).
+        angle        Directional (cosine) loss on x̂₀ — penalises only the angle
+                     between predicted and true velocity vectors (magnitude
+                     ignored). Use alone for a pure flow-direction model.
         curl_div     curl/divergence penalty on reconstructed x̂₀.
         spectral     FFT power-spectrum penalty on reconstructed x̂₀.
         okubo_weiss  Okubo-Weiss eddy-structure penalty.
@@ -234,6 +246,8 @@ class DDPM:
         for lt in self.loss_types:
             if lt == "eps":
                 continue
+            elif lt == "angle":
+                indiv[lt] = _lf_mod.angle_loss(x0_pred, x0, ocean)
             elif lt == "curl_div":
                 indiv[lt] = _lf_mod.curl_div_loss(x0_pred, x0, ocean)
             elif lt == "spectral":

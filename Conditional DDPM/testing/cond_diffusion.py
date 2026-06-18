@@ -9,10 +9,37 @@ DDPM (cosine schedule by default).  Training uses epsilon-prediction MSE
 restricted to ocean pixels (land masked out).
 """
 
+import importlib.util
 import math
+import os
 
 import torch
 import torch.nn.functional as F
+
+# ---------------------------------------------------------------------------
+# Load div_free_noise.py from utils/ via importlib so this file works from any
+# working directory.  Searches up to 4 levels above for utils/div_free_noise.py.
+# ---------------------------------------------------------------------------
+_df_path = None
+for _up in range(5):
+    _candidate = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        *(['..'] * _up),
+        "utils", "div_free_noise.py",
+    ))
+    if os.path.isfile(_candidate):
+        _df_path = _candidate
+        break
+if _df_path is None:
+    raise FileNotFoundError(
+        "Cannot locate utils/div_free_noise.py relative to cond_diffusion.py"
+    )
+_df_spec = importlib.util.spec_from_file_location("div_free_noise", _df_path)
+_df_mod  = importlib.util.module_from_spec(_df_spec)
+_df_spec.loader.exec_module(_df_mod)
+
+NOISE_TYPES            = _df_mod.NOISE_TYPES
+_divergence_free_noise = _df_mod.divergence_free_noise
 
 
 class CondDDPM:
@@ -39,14 +66,26 @@ class CondDDPM:
 
     def __init__(
         self,
-        T:             int   = 1000,
-        beta_schedule: str   = "cosine",
-        device:        str   = "cpu",
-        noise_scale:   float = 1.0,
+        T:               int                 = 1000,
+        beta_schedule:   str                 = "cosine",
+        device:          str                 = "cpu",
+        noise_scale:     float               = 1.0,
+        noise_type:      str                 = "gaussian",
+        spectral_filter: torch.Tensor | None = None,
     ):
         self.T           = T
         self.device      = device
         self.noise_scale = noise_scale
+
+        if noise_type not in NOISE_TYPES:
+            raise ValueError(f"noise_type must be one of {NOISE_TYPES}, got '{noise_type}'")
+        self.noise_type = noise_type
+
+        # Spectral filter for colored div-free noise (CPU tensor, or None)
+        if spectral_filter is not None:
+            self.spectral_filter = spectral_filter.cpu().float()
+        else:
+            self.spectral_filter = None
 
         betas = self._cosine_betas(T) if beta_schedule == "cosine" \
                 else torch.linspace(1e-4, 0.02, T)
@@ -61,6 +100,20 @@ class CondDDPM:
         )
         self.sqrt_ab       = self.alpha_bar.sqrt()
         self.sqrt_one_mab  = (1.0 - self.alpha_bar).sqrt()
+
+    # ------------------------------------------------------------------
+    # Noise sampler
+    # ------------------------------------------------------------------
+
+    def _sample_noise(self, like: torch.Tensor) -> torch.Tensor:
+        """Return noise (gaussian or divergence-free) shaped like `like`."""
+        if self.noise_type == "gaussian":
+            return torch.randn_like(like)
+        return _divergence_free_noise(
+            like.shape,
+            device=str(like.device),
+            spectral_filter=self.spectral_filter,
+        )
 
     # ------------------------------------------------------------------
     # Noise schedule
@@ -85,7 +138,7 @@ class CondDDPM:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample x_t ~ q(x_t | x_0) = N(√ᾱ_t · x0, (1−ᾱ_t) · noise_scale² · I)."""
         if noise is None:
-            noise = torch.randn_like(x0) * self.noise_scale
+            noise = self._sample_noise(x0) * self.noise_scale
         sqrt_ab  = self.sqrt_ab[t][:, None, None, None]
         sqrt_mab = self.sqrt_one_mab[t][:, None, None, None]
         return sqrt_ab * x0 + sqrt_mab * noise, noise
@@ -168,7 +221,7 @@ class CondDDPM:
             (alpha.sqrt() * (1.0 - ab_prev) / (1.0 - ab)) * xt
         )
         var = beta * (1.0 - ab_prev) / (1.0 - ab)
-        return mean + var.sqrt() * self.noise_scale * torch.randn_like(xt)
+        return mean + var.sqrt() * self.noise_scale * self._sample_noise(xt)
 
     @torch.no_grad()
     def sample(
@@ -191,7 +244,7 @@ class CondDDPM:
         if shape is None:
             B = cond.shape[0]
             shape = (B, 2, 94, 44)
-        xt = torch.randn(*shape, device=self.device) * self.noise_scale
+        xt = self._sample_noise(torch.empty(*shape, device=self.device)) * self.noise_scale
         for t in reversed(range(self.T)):
             xt = self.p_sample_step(model, xt, t, cond)
         return xt
@@ -207,7 +260,7 @@ class CondDDPM:
         """
         alpha = self.alphas[t_int]
         beta  = self.betas[t_int]
-        return alpha.sqrt() * x_prev + beta.sqrt() * self.noise_scale * torch.randn_like(x_prev)
+        return alpha.sqrt() * x_prev + beta.sqrt() * self.noise_scale * self._sample_noise(x_prev)
 
     # ------------------------------------------------------------------
     # RePaint inference
@@ -244,7 +297,7 @@ class CondDDPM:
             x0_pred: (1, 2, H, W)
         """
         B, _, H, W = x0_known.shape
-        xt = torch.randn(B, 2, H, W, device=self.device) * self.noise_scale * ocean_mask
+        xt = self._sample_noise(torch.empty(B, 2, H, W, device=self.device)) * self.noise_scale * ocean_mask
 
         for t_int in reversed(range(self.T)):
             for j in range(r):

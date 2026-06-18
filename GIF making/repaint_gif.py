@@ -25,12 +25,27 @@ import os
 import sys
 from io import BytesIO
 
-_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_root, "Model Parameters", "NoiseSchedule"))     # repaint_model (lowest priority)
-sys.path.insert(0, _root)                                                        # dataset, paths
-# diffusion.py lives in DDPM/model/ locally and DDPM/ on the server — try both
-sys.path.insert(0, os.path.join(_root, "DDPM", "model"))
-sys.path.insert(0, os.path.join(_root, "DDPM"))
+_here = os.path.dirname(os.path.abspath(__file__))
+# Locate the repo root by walking up until we find a directory that contains
+# both utils/ (dataset.py, paths.py) and DDPM/.  Works whether this script sits
+# in GIF making/ (local layout) or at the flat repo root (server layout).
+_repo_root = _here
+for _up in range(4):
+    _cand = os.path.normpath(os.path.join(_here, *(['..'] * _up)))
+    if os.path.isdir(os.path.join(_cand, "utils")) and os.path.isdir(os.path.join(_cand, "DDPM")):
+        _repo_root = _cand
+        break
+
+# Candidate module directories for both local and server layouts.
+for _p in (
+    os.path.join(_repo_root, "utils"),                              # dataset, paths (local)
+    _repo_root,                                                     # dataset, paths (server flat)
+    os.path.join(_repo_root, "Model Parameters", "NoiseSchedule"),  # repaint_model
+    os.path.join(_repo_root, "DDPM", "model"),                      # diffusion (local)
+    os.path.join(_repo_root, "DDPM"),                              # diffusion (server)
+):
+    if os.path.isdir(_p):
+        sys.path.insert(0, _p)
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -42,6 +57,7 @@ from dataset       import OceanCurrentDataset
 from diffusion     import DDPM
 from repaint_model import Repaint
 from paths import biased_walk_path
+from divfree_projection import joint_project, divergence as compute_divergence
 
 ALL_SCHEDULES = [
     "linear", "cosine", "cosine_s0001", "cosine_s02", "cosine_s10",
@@ -68,6 +84,12 @@ def parse_args():
     p.add_argument("--path_steps",    type=int, default=150)
     p.add_argument("--resample",      type=int, default=10,
                    help="RePaint r parameter")
+    p.add_argument("--inference_steps", type=int, default=1000,
+                   help="Denoising steps (must divide T). 1000 = full schedule.")
+    p.add_argument("--final_project", type=int, default=0,
+                   help="POCS iters applied ONCE to the final prediction (0=off). "
+                        "Cleans divergence post-hoc with no per-step energy drift; "
+                        "appends one cleaned frame to the end of the GIF.")
     p.add_argument("--seed",          type=int, default=42)
     p.add_argument("--capture_every", type=int, default=20,
                    help="Capture a frame every N reverse timesteps "
@@ -119,7 +141,7 @@ def plot_field(ax, u, v, land_mask, title, step=2, cmap="cool", vmax=None):
 def repaint_frames(
     model, diffusion,
     x0_known, path_mask, land_mask,
-    r=10, device="cpu", capture_every=20,
+    r=10, device="cpu", capture_every=20, inference_steps=None,
 ):
     """
     Identical control flow to repaint_infer.repaint(), but yields
@@ -135,11 +157,9 @@ def repaint_frames(
     land_t  = torch.from_numpy(land_mask).float().to(device)[None, None]
     ocean_t = 1.0 - land_t
 
-    xt = torch.clamp(torch.randn(1, 2, H, W, device=device) * diffusion.noise_scale, -1.0, 1.0)
-    xt = xt * ocean_t
-    T  = diffusion.T
-
     clamp_val = 3.0 * diffusion.noise_scale
+    xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device)) * diffusion.noise_scale
+    xt = torch.clamp(xt, -clamp_val, clamp_val) * ocean_t
 
     def get_x0hat(xt_, t_):
         t_tensor   = torch.full((1,), t_, device=device, dtype=torch.long)
@@ -148,24 +168,34 @@ def repaint_frames(
         x0hat      = (xt_ - (1.0 - ab).sqrt() * pred_noise) / ab.sqrt()
         return x0hat.clamp(-clamp_val, clamp_val).squeeze(0).cpu().numpy()
 
-    for t_int in reversed(range(T)):
+    n_steps  = inference_steps if inference_steps is not None else diffusion.T
+    schedule = diffusion.build_inference_schedule(n_steps)   # [(t, t_prev), ...]
+    n_sched  = len(schedule)
+
+    for step_i, (t_int, t_prev_int) in enumerate(schedule):
         for j in range(r):
-            xt_unknown = diffusion.p_sample_step(model, xt, t_int)
+            # --- Step 1: model reverse step for unknown pixels (proper posterior) ---
+            xt_unknown = diffusion.p_sample_step(model, xt, t_int, t_prev_int)
 
-            t_prev   = max(t_int - 1, 0)
-            t_prev_t = torch.full((1,), t_prev, device=device, dtype=torch.long)
-            xt_known, _ = diffusion.q_sample(x0_known, t_prev_t)
+            # --- Step 2: forward-diffuse x0_known to timestep t_prev (or 0) ---
+            t_prev_q      = max(t_prev_int, 0)
+            t_prev_tensor = torch.full((1,), t_prev_q, device=device, dtype=torch.long)
+            xt_known, _   = diffusion.q_sample(x0_known, t_prev_tensor)
 
+            # --- Step 3: merge known / unknown ---
             xt_merged = known_t * xt_known + (1.0 - known_t) * xt_unknown
             xt_merged = xt_merged * ocean_t
+            xt_merged = torch.nan_to_num(xt_merged, nan=0.0, posinf=1.0, neginf=-1.0)
 
-            if j < r - 1 and t_int > 0:
-                xt = diffusion.q_sample_from_prev(xt_merged, t_int) * ocean_t
+            # --- Step 4: resample (go forward one step) if not last iteration ---
+            if j < r - 1 and t_prev_int >= 0:
+                xt = diffusion.q_sample_from_prev(xt_merged, t_int, t_prev_int) * ocean_t
             else:
                 xt = xt_merged
 
-        # Capture: always the very first and very last step, plus every N steps
-        if t_int == T - 1 or t_int == 0 or t_int % capture_every == 0:
+        # Capture by schedule position so it works for any (subsampled) schedule:
+        # always the first and final step, plus every `capture_every` steps.
+        if step_i == 0 or step_i == n_sched - 1 or step_i % capture_every == 0:
             yield t_int, xt.squeeze(0).cpu().numpy(), get_x0hat(xt, t_int)
 
 
@@ -269,10 +299,6 @@ def main():
     print(f"capture_every : {args.capture_every}  ->  ~{n_frames_approx} frames")
     print(f"FPS           : {args.fps}")
 
-    # ---- Data ----------------------------------------------------------------
-    test_ds      = OceanCurrentDataset(args.pickle, split=args.split)
-    land_mask_np = test_ds.land_mask.numpy()
-
     # ---- Model ---------------------------------------------------------------
     ckpt      = torch.load(args.checkpoint, map_location=device, weights_only=False)
     ckpt_args = ckpt.get("args", {})
@@ -280,6 +306,17 @@ def main():
     time_dim  = ckpt_args.get("time_dim", args.time_dim)
     T         = ckpt_args.get("T",        args.T)
     schedule  = ckpt_args.get("schedule", args.schedule)
+
+    # Normalization metadata (colored model trained with --normalize)
+    data_mean = ckpt.get("data_mean", None)
+    data_std  = ckpt.get("data_std",  None)
+
+    # ---- Data ----------------------------------------------------------------
+    test_ds      = OceanCurrentDataset(args.pickle, split=args.split,
+                                       data_mean=data_mean, data_std=data_std)
+    land_mask_np = test_ds.land_mask.numpy()
+    if data_mean is not None:
+        print(f"Normalized    : mean={data_mean:.5f}  std={data_std:.5f}")
 
     model = Repaint(in_ch=2, base_ch=base_ch, time_dim=time_dim).to(device)
     model.load_state_dict(ckpt["model"])
@@ -289,13 +326,22 @@ def main():
 
     noise_std = ckpt_args.get("noise_scale", ckpt.get("noise_std", None))
     if noise_std is None:
-        train_ds  = OceanCurrentDataset(args.pickle, split=0)
+        train_ds  = OceanCurrentDataset(args.pickle, split=0,
+                                        data_mean=data_mean, data_std=data_std)
         noise_std = float(train_ds.data[:, :, ~train_ds.land_mask].std())
         print(f"noise_std     : {noise_std:.5f}  (computed from training data)")
     else:
         print(f"noise_std     : {noise_std:.5f}  (from checkpoint)")
 
-    diffusion = DDPM(T=T, beta_schedule=schedule, device=device, noise_scale=noise_std)
+    # Divergence-free colored noise (matches the new pipeline) when the
+    # checkpoint was trained that way; otherwise fall back to gaussian.
+    noise_type      = ckpt_args.get("noise_type", "gaussian")
+    spectral_filter = ckpt.get("spectral_filter", None)
+    print(f"noise_type    : {noise_type}")
+
+    diffusion = DDPM(T=T, beta_schedule=schedule, device=device,
+                     noise_type=noise_type, spectral_filter=spectral_filter,
+                     noise_scale=noise_std)
 
     # ---- Sample & path -------------------------------------------------------
     idx       = args.sample % len(test_ds)
@@ -307,6 +353,21 @@ def main():
 
     true_np = x0_true.numpy()
     n_ocean = int((~test_ds.land_mask).sum().item())
+
+    # ---- Un-normalize for display (physical units) --------------------------
+    # The colored model trains on normalized data (mean/std stored in the
+    # checkpoint), so its fields live in normalized units (~10x physical). We
+    # convert back to physical units for display so vector magnitudes match the
+    # un-normalized (old-pipeline) GIFs instead of looking "insanely large".
+    # Old/unnormalized checkpoints (data_mean is None) are displayed as-is.
+    def _denorm(arr):
+        if data_mean is None:
+            return arr
+        out = arr * data_std + data_mean
+        out[:, land_mask_np] = 0.0   # re-zero land (mean offset must not leak in)
+        return out
+
+    true_np = _denorm(true_np)
 
     # Fixed colour scale from ground truth — keeps all frames comparable
     true_speed = np.sqrt(true_np[0] ** 2 + true_np[1] ** 2)
@@ -327,11 +388,16 @@ def main():
     # ---- Inference + frame collection ----------------------------------------
     pil_frames = []
     final_pred_np = None
+    final_raw_np  = None
 
     for t_int, xt_np, x0hat_np in repaint_frames(
         model, diffusion, x0_obs, path_mask, land_mask_np,
         r=args.resample, device=device, capture_every=args.capture_every,
+        inference_steps=args.inference_steps,
     ):
+        final_raw_np = xt_np   # raw (normalized) field, before display denorm
+        xt_np    = _denorm(xt_np)
+        x0hat_np = _denorm(x0hat_np)
         pil_frames.append(make_frame(
             t_int, T, schedule, idx,
             u_true_d,      v_true_d,
@@ -344,8 +410,37 @@ def main():
         if len(pil_frames) % 10 == 0 or t_int == 0:
             print(f"  t={t_int:4d}  frame {len(pil_frames)}")
 
-    # ---- RMSE over ocean cells (both channels) --------------------------------
+    # ---- Optional post-hoc divergence-free projection ------------------------
+    # One joint POCS projection on the final field cleans the RePaint seam
+    # (|div| -> ~0) without the per-step energy drift of in-loop PPR.
     ocean = ~land_mask_np
+    ocean_mask_t = torch.from_numpy(ocean)
+    if args.final_project > 0 and final_raw_np is not None:
+        div_before = float(compute_divergence(
+            torch.from_numpy(_denorm(final_raw_np)).unsqueeze(0).float(),
+            ocean_mask_t)[0][ocean_mask_t].abs().mean())
+        x_proj = joint_project(
+            torch.from_numpy(final_raw_np).unsqueeze(0).float(),
+            ocean_mask_t, torch.from_numpy(path_mask),
+            x0_obs.unsqueeze(0).float(), n_iter=args.final_project,
+        ).squeeze(0).numpy()
+        proj_disp = _denorm(x_proj)
+        div_after = float(compute_divergence(
+            torch.from_numpy(proj_disp).unsqueeze(0).float(),
+            ocean_mask_t)[0][ocean_mask_t].abs().mean())
+        # Append one final cleaned frame (projected field in both xt + x0-hat panels)
+        pil_frames.append(make_frame(
+            0, T, schedule, idx,
+            u_true_d,         v_true_d,
+            proj_disp[0].T,   proj_disp[1].T,
+            proj_disp[0].T,   proj_disp[1].T,
+            path_mask_d, land_mask_d, path_mask.sum(), args.seed, vmax=vmax,
+        ))
+        final_pred_np = proj_disp
+        print(f"Final projection ({args.final_project} POCS iters): "
+              f"|div| {div_before:.6f} -> {div_after:.6f}")
+
+    # ---- RMSE over ocean cells (both channels) --------------------------------
     diff  = final_pred_np[:, ocean] - true_np[:, ocean]
     rmse  = float(np.sqrt(np.mean(diff ** 2)))
     print(f"\nRMSE          : {rmse:.6f}  (sample {idx}, {ocean.sum()} ocean cells)")
