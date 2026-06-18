@@ -256,8 +256,9 @@ def main():
     print(f"Loaded checkpoint  epoch={ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss','?'):.5f}")
 
     diffusion = CondDDPM(
-        T             = ckpt_args.get("T",        1000),
-        beta_schedule = ckpt_args.get("schedule", "cosine"),
+        T             = ckpt_args.get("T",           1000),
+        beta_schedule = ckpt_args.get("schedule",    "cosine"),
+        noise_scale   = ckpt_args.get("noise_scale", 1.0),
         device        = device,
     )
 
