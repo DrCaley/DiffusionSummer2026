@@ -29,7 +29,7 @@ sys.path.insert(0, _repo_root)
 sys.path.insert(0, _voronoi_model_dir)
 
 from dataset        import OceanCurrentDataset
-from paths          import biased_walk_path
+from paths          import biased_walk_path, basic_robot_path
 from voronoi_model  import VoronoiLayer
 from cond_model     import CondUNet
 from cond_diffusion import CondDDPM
@@ -81,6 +81,10 @@ def parse_args():
                    help="RePaint resampling iterations per timestep for path/both modes (default: 10).")
     p.add_argument("--no_repaint", action="store_true",
                    help="Use pure conditional sampling (diffusion.sample) instead of RePaint.")
+    p.add_argument("--path_fn",    default="biased_walk", choices=["biased_walk", "basic_robot"],
+                   help="Path generation function used at inference time.")
+    p.add_argument("--segment_len", type=int, default=10,
+                   help="Segment length for basic_robot path (default: 10).")
     return p.parse_args()
 
 
@@ -89,12 +93,15 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def make_cond_single(x0, land_mask_np, voronoi_layer, cond_mode, n_steps, seed, device):
+def make_cond_single(x0, land_mask_np, voronoi_layer, cond_mode, path_fn, n_steps, segment_len, seed, device):
     """Return (1, cond_in_ch, H, W) conditioning map for one sample."""
     _, H, W = x0.shape
     C = x0.shape[0]
 
-    path_mask = biased_walk_path(land_mask_np, n_steps=n_steps, seed=seed)
+    if path_fn == "basic_robot":
+        path_mask = basic_robot_path(land_mask_np, segment_len=segment_len, seed=seed)
+    else:
+        path_mask = biased_walk_path(land_mask_np, n_steps=n_steps, seed=seed)
     rows, cols = np.where(path_mask)
     K = len(rows)
 
@@ -263,7 +270,7 @@ def main():
 
         cond, path_mask = make_cond_single(
             x0_true, land_mask_np, voronoi_layer,
-            args.cond, args.path_steps, seed, device,
+            args.cond, args.path_fn, args.path_steps, args.segment_len, seed, device,
         )
 
         if args.no_repaint:
