@@ -61,7 +61,7 @@ sys.path.insert(0, _repo_root)       # workspace root     (dataset.py, paths.py)
 sys.path.insert(0, _voronoi_model_dir)  # Voronoi/model/  (voronoi_model.py)
 
 from dataset        import OceanCurrentDataset
-from paths          import biased_walk_path
+from paths          import biased_walk_path, basic_robot_path
 from voronoi_model  import VoronoiLayer
 from cond_model     import CondUNet
 from cond_diffusion import CondDDPM
@@ -88,7 +88,9 @@ def _make_cond(
     land_mask_np:   np.ndarray,          # (H, W) bool
     voronoi_layer:  VoronoiLayer | None, # pre-built; None for path-only
     cond_mode:      str,
+    path_fn:        str,
     n_steps:        int,
+    segment_len:    int,
     epoch:          int,
     batch_idx:      int,
     device:         str,
@@ -106,8 +108,11 @@ def _make_cond(
     cond_list = []
 
     for b in range(B):
-        seed      = epoch * 100_000 + batch_idx * 1_000 + b
-        path_mask = biased_walk_path(land_mask_np, n_steps=n_steps, seed=seed)
+        seed = epoch * 100_000 + batch_idx * 1_000 + b
+        if path_fn == "basic_robot":
+            path_mask = basic_robot_path(land_mask_np, segment_len=segment_len, seed=seed)
+        else:
+            path_mask = biased_walk_path(land_mask_np, n_steps=n_steps, seed=seed)
         rows, cols = np.where(path_mask)
         K = len(rows)
 
@@ -163,7 +168,7 @@ def parse_args():
     p.add_argument("--cond",       required=True, choices=list(COND_MODES),
                    help="Conditioning mode: voronoi | path | both")
     p.add_argument("--pickle",     default="data.pickle")
-    p.add_argument("--epochs",     type=int,   default=400)
+    p.add_argument("--epochs",     type=int,   default=100)
     p.add_argument("--batch",      type=int,   default=16)
     p.add_argument("--lr",         type=float, default=2e-4)
     p.add_argument("--base_ch",    type=int,   default=64)
@@ -176,6 +181,10 @@ def parse_args():
     p.add_argument("--schedule",   default="cosine", choices=["cosine", "linear"])
     p.add_argument("--path_steps", type=int,   default=150,
                    help="Number of biased-walk steps for sensor path generation.")
+    p.add_argument("--path_fn",    default="biased_walk", choices=["biased_walk", "basic_robot"],
+                   help="Path generation function: biased_walk (default) or basic_robot.")
+    p.add_argument("--segment_len", type=int,  default=10,
+                   help="Straight-line segment length for basic_robot path (default: 10).")
     p.add_argument("--save_dir",   default=None,
                    help="Checkpoint directory. Defaults to "
                         "'Conditional DDPM/checkpoints_{cond}/'.")
@@ -257,7 +266,8 @@ def main():
             x0 = x0.to(device)
             cond = _make_cond(
                 x0, land_mask_np, voronoi_layer,
-                args.cond, args.path_steps, epoch, batch_idx, device,
+                args.cond, args.path_fn, args.path_steps, args.segment_len,
+                epoch, batch_idx, device,
             )
             loss = diffusion.training_loss(model, x0, land_mask, cond)
             optimizer.zero_grad()
@@ -275,7 +285,8 @@ def main():
                 x0 = x0.to(device)
                 cond = _make_cond(
                     x0, land_mask_np, voronoi_layer,
-                    args.cond, args.path_steps, epoch, batch_idx, device,
+                    args.cond, args.path_fn, args.path_steps, args.segment_len,
+                    epoch, batch_idx, device,
                 )
                 loss = diffusion.training_loss(model, x0, land_mask, cond)
                 val_loss += loss.item()

@@ -79,6 +79,8 @@ def parse_args():
                    help="Output directory. Defaults to 'Conditional DDPM/results_{cond}'.")
     p.add_argument("--resample",   type=int, default=10,
                    help="RePaint resampling iterations per timestep for path/both modes (default: 10).")
+    p.add_argument("--no_repaint", action="store_true",
+                   help="Use pure conditional sampling (diffusion.sample) instead of RePaint.")
     return p.parse_args()
 
 
@@ -210,7 +212,8 @@ def main():
             f"best_cond_ddpm_{args.cond}_cosine.pt",
         )
     if args.out_dir is None:
-        args.out_dir = os.path.join(_here, f"results_{args.cond}")
+        suffix = "_no_repaint" if args.no_repaint else ""
+        args.out_dir = os.path.join(_here, f"results_{args.cond}{suffix}")
     os.makedirs(args.out_dir, exist_ok=True)
 
     print(f"Device     : {device}")
@@ -263,18 +266,21 @@ def main():
             args.cond, args.path_steps, seed, device,
         )
 
-        # Inference: RePaint for all modes — anchors true u/v at path cells
-        path_t       = torch.from_numpy(path_mask.astype(np.float32)).to(device)
-        x0_known     = x0_true * path_t.unsqueeze(0)          # (2, H, W)
-        x0_known_b   = x0_known.unsqueeze(0)                  # (1, 2, H, W)
-        path_mask_t  = path_t[None, None]                     # (1, 1, H, W)
-        ocean_mask_t = torch.from_numpy(
-            (~land_mask_np).astype(np.float32)
-        ).to(device)[None, None]                              # (1, 1, H, W)
-        x0_pred = diffusion.repaint(
-            model, cond, x0_known_b, path_mask_t, ocean_mask_t,
-            r=args.resample,
-        )[0]  # (2, H, W)
+        if args.no_repaint:
+            x0_pred = diffusion.sample(model, cond)[0]  # (2, H, W)
+        else:
+            # Inference: RePaint — anchors true u/v at path cells
+            path_t       = torch.from_numpy(path_mask.astype(np.float32)).to(device)
+            x0_known     = x0_true * path_t.unsqueeze(0)          # (2, H, W)
+            x0_known_b   = x0_known.unsqueeze(0)                  # (1, 2, H, W)
+            path_mask_t  = path_t[None, None]                     # (1, 1, H, W)
+            ocean_mask_t = torch.from_numpy(
+                (~land_mask_np).astype(np.float32)
+            ).to(device)[None, None]                              # (1, 1, H, W)
+            x0_pred = diffusion.repaint(
+                model, cond, x0_known_b, path_mask_t, ocean_mask_t,
+                r=args.resample,
+            )[0]  # (2, H, W)
 
         # Metrics on ocean pixels only
         u_true_np = x0_true[0].cpu().numpy()
