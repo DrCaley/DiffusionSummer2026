@@ -1,0 +1,115 @@
+Device      : cuda
+Checkpoint  : Stride/checkpoints_cosine/best_model_cosine.pt
+Strides     : [1, 5, 10, 20, 50]
+N samples   : 10
+Loaded      : epoch 125, val_loss=0.00036, schedule=cosine, curl_div_weight=0.002, noise_std=0.11619
+
+Sample 1/10  (test idx=0)
+  stride=  1  (1000 steps)  RMSE=0.2039
+  stride=  5  ( 200 steps)  RMSE=0.1784
+  stride= 10  ( 100 steps)  RMSE=0.1824
+  stride= 20  (  50 steps)  RMSE=0.1971
+  stride= 50  (  20 steps)  RMSE=0.1635
+    Saved: Stride/results/images_cosine/result_01_all_strides.png
+
+Sample 2/10  (test idx=1)
+  stride=  1  (1000 steps)  RMSE=0.1498
+  stride=  5  ( 200 steps)  RMSE=0.1284
+  stride= 10  ( 100 steps)  RMSE=0.1380
+  stride= 20  (  50 steps)  RMSE=0.1344
+  stride= 50  (  20 steps)  RMSE=0.1161
+    Saved: Stride/results/images_cosine/result_02_all_strides.png
+
+Sample 3/10  (test idx=2)
+  stride=  1  (1000 steps)  RMSE=0.1991
+  stride=  5  ( 200 steps)  RMSE=0.1791
+  stride= 10  ( 100 steps)  RMSE=0.1872
+  stride= 20  (  50 steps)  RMSE=0.1650
+  stride= 50  (  20 steps)  RMSE=0.1795
+    Saved: Stride/results/images_cosine/result_03_all_strides.png
+
+Sample 4/10  (test idx=3)
+  stride=  1  (1000 steps)  RMSE=0.1961
+  stride=  5  ( 200 steps)  RMSE=0.2104
+  stride= 10  ( 100 steps)  RMSE=0.1809
+  stride= 20  (  50 steps)  RMSE=0.1584
+  stride= 50  (  20 steps)  RMSE=0.1745
+    Saved: Stride/results/images_cosine/result_04_all_strides.png
+
+Sample 5/10  (test idx=4)
+  stride=  1  (1000 steps)  RMSE=0.1891
+  stride=  5  ( 200 steps)  RMSE=0.1398
+  stride= 10  ( 100 steps)  RMSE=0.1503
+  stride= 20  (  50 steps)  RMSE=0.1381
+  stride= 50  (  20 steps)  RMSE=0.1502
+    Saved: Stride/results/images_cosine/result_05_all_strides.png
+
+Sample 6/10  (test idx=5)
+  stride=  1  (1000 steps)  RMSE=0.1751
+  stride=  5  ( 200 steps)  RMSE=0.2198
+  stride= 10  ( 100 steps)  RMSE=0.2321
+  stride= 20  (  50 steps)  RMSE=0.1942
+  stride= 50  (  20 steps)  RMSE=0.1763
+    Saved: Stride/results/images_cosine/result_06_all_strides.png
+
+Sample 7/10  (test idx=6)
+  stride=  1  (1000 steps)  RMSE=0.1990
+  stride=  5  ( 200 steps)  RMSE=0.2193
+  stride= 10  ( 100 steps)  RMSE=0.2437
+  stride= 20  (  50 steps)  RMSE=0.2328
+  stride= 50  (  20 steps)  RMSE=0.1116
+    Saved: Stride/results/images_cosine/result_07_all_strides.png
+
+Sample 8/10  (test idx=7)
+  stride=  1  (1000 steps)  RMSE=0.1731
+  stride=  5  ( 200 steps)  RMSE=0.1882
+  stride= 10  ( 100 steps)  RMSE=0.1870
+  stride= 20  (  50 steps)  RMSE=0.1919
+  stride= 50  (  20 steps)  RMSE=0.1614
+    Saved: Stride/results/images_cosine/result_08_all_strides.png
+
+Sample 9/10  (test idx=8)
+  stride=  1  (1000 steps)  RMSE=0.1096
+  stride=  5  ( 200 steps)  RMSE=0.1271
+  stride= 10  ( 100 steps)  RMSE=0.0910
+  stride= 20  (  50 steps)  RMSE=0.1180
+  stride= 50  (  20 steps)  RMSE=0.0716
+    Saved: Stride/results/images_cosine/result_09_all_strides.png
+
+Sample 10/10  (test idx=9)
+  stride=  1  (1000 steps)  RMSE=0.2103
+  stride=  5  ( 200 steps)  RMSE=0.1711
+  stride= 10  ( 100 steps)  RMSE=0.1505
+  stride= 20  (  50 steps)  RMSE=0.1687
+  stride= 50  (  20 steps)  RMSE=0.1352
+    Saved: Stride/results/images_cosine/result_10_all_strides.png
+
+Geometric schedule stride comparison
+Checkpoint       : Stride/checkpoints_cosine/best_model_cosine.pt
+curl_div_weight  : 0.002
+noise_std        : 0.11619
+N samples  : 10
+resample r : 10
+path_steps : 150
+
+  Stride   Steps   Mean RMSE       Std       Min       Max
+--------------------------------------------------------
+       1    1000      0.1805    0.0292    0.1096    0.2103
+       5     200      0.1762    0.0334    0.1271    0.2198
+      10     100      0.1743    0.0424    0.0910    0.2437
+      20      50      0.1699    0.0330    0.1180    0.2328
+      50      20      0.1440    0.0333    0.0716    0.1795
+
+Per-sample breakdown:
+  sample   0: s1=0.2039  s5=0.1784  s10=0.1824  s20=0.1971  s50=0.1635
+  sample   1: s1=0.1498  s5=0.1284  s10=0.1380  s20=0.1344  s50=0.1161
+  sample   2: s1=0.1991  s5=0.1791  s10=0.1872  s20=0.1650  s50=0.1795
+  sample   3: s1=0.1961  s5=0.2104  s10=0.1809  s20=0.1584  s50=0.1745
+  sample   4: s1=0.1891  s5=0.1398  s10=0.1503  s20=0.1381  s50=0.1502
+  sample   5: s1=0.1751  s5=0.2198  s10=0.2321  s20=0.1942  s50=0.1763
+  sample   6: s1=0.1990  s5=0.2193  s10=0.2437  s20=0.2328  s50=0.1116
+  sample   7: s1=0.1731  s5=0.1882  s10=0.1870  s20=0.1919  s50=0.1614
+  sample   8: s1=0.1096  s5=0.1271  s10=0.0910  s20=0.1180  s50=0.0716
+  sample   9: s1=0.2103  s5=0.1711  s10=0.1505  s20=0.1687  s50=0.1352
+
+Saved: Stride/results/stride_comparison_cosine.txt
