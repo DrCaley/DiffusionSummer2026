@@ -2,7 +2,7 @@
 Inference + visualisation for the CONDITIONAL stream-function divergence-free DDPM.
 
 Counterpart of the unconditional `direction_magnitude_display.py`, written for the
-model trained by `train_streamfn_cond.py` (pred_type = "x0_streamfn_cond").  The
+model trained by `train_cond.py` (pred_type = "x0_streamfn_cond").  The
 model ingests, alongside the noisy field x_t, a 10-channel conditioning stack
 (soft robot-path observations, 13 h + 25 h temporal-prior fields, and static
 geometry) and emits a scalar stream function whose curl is an EXACTLY
@@ -33,12 +33,12 @@ style — quiver panels coloured by speed, land in black):
       how the guesses agree where informed and diverge where unconstrained.
 
 Usage (from workspace root, after a checkpoint exists):
-    python DDPM/testing/cond_infer_display.py \
-        --checkpoint DDPM/model/checkpoints_streamfn_cond/best_streamfncond_minsnr5_ang1_lags13-25_div_free_cosine.pt \
-        --pickle     Datasets/data_divfree.pickle \
+    python "Conditional DDPM/testing/infer_cond.py" \
+        --checkpoint "Conditional DDPM/checkpoints_cond/best_streamfncond_minsnr5_ang1_lags13-25_div_free_cosine.pt" \
+        --pickle     Datasets/data_divfree_chrono.pickle \
         --n_samples  4 --random --seed 1234 \
         --n_ensemble 6 --inference_steps 100 \
-        --out_dir    DDPM/best_model_results/cond_streamfn
+        --out_dir    "Conditional DDPM/results/cond_streamfn"
 """
 
 import argparse
@@ -382,7 +382,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Conditional stream-function DDPM inference + visualisation.")
     p.add_argument("--checkpoint", required=True)
-    p.add_argument("--pickle", default="Datasets/data_divfree.pickle")
+    p.add_argument("--pickle", default="Datasets/data_divfree_chrono.pickle")
     p.add_argument("--split", type=int, default=1, help="0=train,1=val,2=test")
     p.add_argument("--n_samples", type=int, default=4)
     p.add_argument("--random", action="store_true",
@@ -397,7 +397,7 @@ def parse_args():
                    help="Robot-path length (fixed at inference).")
     p.add_argument("--fps", type=int, default=10)
     p.add_argument("--no_gif", action="store_true", help="Skip the denoising GIF.")
-    p.add_argument("--out_dir", default="DDPM/best_model_results/cond_streamfn")
+    p.add_argument("--out_dir", default="Conditional DDPM/results/cond_streamfn")
     return p.parse_args()
 
 

@@ -16,22 +16,34 @@ North star: given a few known pixels (the robot path) plus recent history,
 produce a PLAUSIBLE, divergence-free, well-calibrated full current field — and,
 via the diffusion non-determinism, a diverse ensemble of such guesses.
 
-Recommended:
-    python train_streamfn_cond.py \
-        --pickle    /path/to/data_divfree.pickle \
+Recommended (from the workspace root):
+    python "Conditional DDPM/train_cond.py" \
+        --pickle    Datasets/data_divfree_chrono.pickle \
         --std_only  --noise_type div_free --schedule cosine \
         --epochs 300 --batch 8 --lr 2e-4 \
         --lambda_angle 1.0 --min_snr_gamma 5.0 \
         --lags 13,25 --path_steps 50,400 --workers 4 \
-        --save_dir checkpoints_streamfn_cond
+        --save_dir "Conditional DDPM/checkpoints_cond"
 """
 
 import argparse
 import copy
 import os
+import sys
 
 import torch
 from torch.utils.data import DataLoader
+
+# ---------------------------------------------------------------------------
+# Path setup — the shared model/diffusion code lives in DDPM/model and the
+# conditional dataset in utils.  Works from the workspace root or a flat layout.
+# ---------------------------------------------------------------------------
+_here = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.normpath(os.path.join(_here, ".."))
+for _p in [_root, os.path.join(_root, "utils"),
+           os.path.join(_root, "DDPM", "model"), _here]:
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from cond_dataset import ConditionalOceanDataset, cond_channels
 from diffusion    import DDPM, NOISE_TYPES
@@ -81,7 +93,7 @@ def _parse_lags(spec: str):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--pickle",   default="data_divfree.pickle")
+    p.add_argument("--pickle",   default="Datasets/data_divfree_chrono.pickle")
     p.add_argument("--epochs",   type=int,   default=300)
     p.add_argument("--batch",    type=int,   default=8)
     p.add_argument("--lr",       type=float, default=2e-4)
@@ -99,7 +111,7 @@ def parse_args():
     p.add_argument("--ema_decay", type=float, default=0.999,
                    help="EMA decay for the saved weights (0 disables EMA).")
     p.add_argument("--noise_scale", type=float, default=1.0)
-    p.add_argument("--save_dir", default="checkpoints_streamfn_cond")
+    p.add_argument("--save_dir", default="Conditional DDPM/checkpoints_cond")
     p.add_argument("--workers",  type=int, default=0)
     p.add_argument("--spectral_filter", default=None,
                    help="Path to spectral_filter.npy for colored div-free noise.")
