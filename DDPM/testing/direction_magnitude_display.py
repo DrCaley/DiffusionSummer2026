@@ -62,8 +62,8 @@ for _p in [_root, os.path.join(_root, "utils"), _model, _repaint, _ppr]:
     sys.path.insert(0, _p)
 
 from dataset            import OceanCurrentDataset
-from diffusion          import DDPM
-from model              import UNet
+from diffusion          import DDPM, EpsFromStreamFn
+from model              import UNet, StreamFunctionUNet
 from divfree_projection import joint_project
 from repaint_infer      import biased_walk_path
 
@@ -100,6 +100,93 @@ def angle_error_deg(pred_np: np.ndarray, true_np: np.ndarray,
     out    = np.full(err.shape, np.nan, dtype=np.float32)
     out[valid] = err[valid]
     return out
+
+
+def directional_spread(members: list[np.ndarray], ocean_np: np.ndarray,
+                       eps: float = 1e-8) -> np.ndarray:
+    """
+    Per-cell directional disagreement across an ensemble of (2, H, W) fields.
+
+    Each member's vector is unit-normalized, then the circular spread is
+    1 − R where R = |mean unit vector| ∈ [0, 1] is the resultant length.
+    R = 1 → all members point the same way (confident); R ≈ 0 → directions
+    scattered (uncertain).  Magnitude-independent, matching the angle metric.
+
+    Returns (H, W) float in [0, 1]; NaN at land.
+    """
+    us, vs = [], []
+    for m in members:
+        uh, vh, _ = unit_normalize(m, ocean_np, eps)
+        us.append(uh); vs.append(vh)
+    mean_u = np.mean(us, axis=0)
+    mean_v = np.mean(vs, axis=0)
+    R = np.sqrt(mean_u ** 2 + mean_v ** 2)          # resultant length [0,1]
+    spread = 1.0 - R
+    spread[~ocean_np] = np.nan
+    return spread.astype(np.float32)
+
+
+@torch.no_grad()
+def ensemble_infer(model, diffusion, x0_obs, path_mask, land_np, args, device,
+                   base_seed=0):
+    """
+    Draw args.n_ensemble independent posterior samples and average them.
+
+    Returns (mean_pred, frames, members):
+      mean_pred : (2, H, W) posterior-mean field (average of the members, in the
+                  model's normalized space — averaging is linear so a stream-
+                  function model's div-free property is preserved).
+      frames    : denoising trajectory of the FIRST member (for the GIF).
+      members   : list of the individual member predictions.
+    Each member is seeded deterministically from base_seed so runs are
+    reproducible and members are independent across samples.
+    """
+    members, frames0 = [], None
+    for k in range(max(1, args.n_ensemble)):
+        torch.manual_seed((base_seed + 1) * 100003 + k)
+        pred_k, frames_k = infer_capture(
+            model, diffusion, x0_obs, path_mask, land_np, args, device)
+        members.append(pred_k)
+        if k == 0:
+            frames0 = frames_k
+    mean_pred = np.mean(members, axis=0).astype(np.float32)
+    return mean_pred, frames0, members
+
+
+# ===========================================================================
+# Distance-to-path stratification (Option D): near-field vs far-field error
+# ===========================================================================
+
+_DIST_BANDS = [
+    (0.0,  2.0,      "near  (0-2)"),
+    (2.0,  5.0,      "mid   (2-5)"),
+    (5.0,  10.0,     "far   (5-10)"),
+    (10.0, np.inf,   "deep  (10+)"),
+]
+
+
+def distance_to_path(path_mask: np.ndarray, ocean_np: np.ndarray) -> np.ndarray:
+    """Euclidean distance (in grid cells) from each ocean cell to the nearest
+    observed path cell.  Land cells are NaN."""
+    from scipy import ndimage
+    dist = ndimage.distance_transform_edt(~path_mask).astype(np.float32)
+    dist[~ocean_np] = np.nan
+    return dist
+
+
+def stratified_rows(err_vals: np.ndarray, dist_vals: np.ndarray):
+    """Bin per-cell angular error by distance-to-path band.  Returns a list of
+    (label, n_cells, mean_err_deg, mean_cos)."""
+    rows = []
+    for lo, hi, label in _DIST_BANDS:
+        m = (dist_vals >= lo) & (dist_vals < hi)
+        if m.any():
+            e = err_vals[m]
+            rows.append((label, int(e.size), float(np.mean(e)),
+                         float(np.mean(np.cos(np.radians(e))))))
+        else:
+            rows.append((label, 0, float("nan"), float("nan")))
+    return rows
 
 
 # ===========================================================================
@@ -193,7 +280,7 @@ def infer_capture(model, diffusion, x0_known, path_mask, land_mask, args, device
                     xt = diffusion.q_sample_from_prev(xt_merged, t_int, t_prev_int) * ocean_f
                 else:
                     xt = xt_merged
-            else:
+            elif args.method == "ppr":
                 # --- PPR: project the clean Tweedie estimate, then renoise ---
                 x0_hat = x0hat_from(xt, t_int).clamp(-clamp, clamp)
                 if args.projector == "snap_x0":
@@ -218,6 +305,36 @@ def infer_capture(model, diffusion, x0_known, path_mask, land_mask, args, device
                 xt = xt * ocean_f
                 if j < args.resample - 1 and t_prev_int >= 0:
                     xt = diffusion.q_sample_from_prev(xt, t_int, t_prev_int) * ocean_f
+            else:
+                # --- DPS: Diffusion Posterior Sampling (Chung et al., ICLR 2023) ---
+                # Unconditional ancestral step + gradient of the measurement
+                # likelihood ‖obs − x̂₀‖² back-propagated through the network.
+                # Softer than RePaint's hard snap: guides rather than overwrites.
+                with torch.enable_grad():
+                    xt_g     = xt.detach().requires_grad_(True)
+                    t_tensor = torch.full((1,), t_int, device=device, dtype=torch.long)
+                    eps_hat  = model(xt_g, t_tensor)
+                    ab       = diffusion.alpha_bar[t_int]
+                    x0_g     = (xt_g - (1.0 - ab).sqrt() * eps_hat) / ab.sqrt().clamp(min=1e-8)
+                    resid    = (x0_g - x0_known_t) * known_t * ocean_f
+                    loss     = (resid ** 2).sum()
+                    grad     = torch.autograd.grad(loss, xt_g)[0]
+                x0_hat     = x0_g.detach().clamp(-clamp, clamp) * ocean_f
+                last_x0hat = x0_hat
+                if t_prev_int < 0:
+                    xt = x0_hat
+                else:
+                    ab_prev  = diffusion.alpha_bar[t_prev_int]
+                    beta_eff = 1.0 - ab / ab_prev
+                    var      = (1.0 - ab_prev) / (1.0 - ab) * beta_eff
+                    coef1 = ab_prev.sqrt() * beta_eff / (1.0 - ab)
+                    coef2 = (ab / ab_prev).sqrt() * (1.0 - ab_prev) / (1.0 - ab)
+                    mean  = coef1 * x0_hat + coef2 * xt.detach()
+                    xt    = mean + var.sqrt() * diffusion._sample_noise(xt)
+                    zeta  = args.dps_scale / (resid.detach().norm() + 1e-8)
+                    xt    = xt - zeta * grad
+                xt = (xt * ocean_f).detach()
+                break  # DPS does not use RePaint-style resampling
 
         capture = (step_i == 0 or step_i == n_sched - 1
                    or step_i % args.capture_every == 0)
@@ -397,8 +514,14 @@ def parse_args():
     p.add_argument("--checkpoint", default="checkpoints_angle/best_ddpm_angle_div_free_cosine.pt")
     p.add_argument("--mag_checkpoint", default=None,
                    help="Magnitude UNet checkpoint (optional; enables fused panel).")
-    p.add_argument("--method",     default="repaint", choices=["ppr", "repaint"])
+    p.add_argument("--method",     default="repaint", choices=["ppr", "repaint", "dps"])
+    p.add_argument("--dps_scale",  type=float, default=1.0,
+                   help="DPS guidance step size ζ' (used when --method dps).")
     p.add_argument("--n_samples",  type=int, default=5)
+    p.add_argument("--n_ensemble", type=int, default=1,
+                   help="Draw this many posterior samples per field and average "
+                        "them (the posterior-mean estimator). >1 also reports a "
+                        "per-cell directional-uncertainty map. Default 1 (off).")
     p.add_argument("--random",     action="store_true")
     p.add_argument("--seed",       type=int, default=1234)
     p.add_argument("--path_steps", type=int, default=150)
@@ -435,9 +558,6 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"Device : {device}")
 
-    val_ds  = OceanCurrentDataset(args.pickle, split=1)
-    land_np = val_ds.land_mask.numpy().astype(bool)
-
     # ---- Angle (direction) DDPM ----
     ckpt      = torch.load(args.checkpoint, map_location=device, weights_only=False)
     ckpt_args = ckpt.get("args", {})
@@ -446,13 +566,44 @@ def main():
     T         = ckpt_args.get("T",        args.T)
     noise_type      = ckpt_args.get("noise_type", "gaussian")
     spectral_filter = ckpt.get("spectral_filter", None)
+    data_mean = ckpt.get("data_mean", None)
+    data_std  = ckpt.get("data_std", None)
 
-    model = UNet(in_ch=2, base_ch=base_ch, time_dim=time_dim).to(device)
-    model.load_state_dict(ckpt["model"])
-    model.eval()
+    # Load val data in the SAME normalization the model was trained with, so the
+    # network sees inputs at the scale it expects.  Critical for std-only models
+    # (data_mean=0, data_std<1): feeding raw-scale data would recreate the SNR
+    # mismatch.  Un-normalized models store data_mean=None -> no normalization.
+    val_ds  = OceanCurrentDataset(args.pickle, split=1,
+                                  data_mean=data_mean, data_std=data_std)
+    land_np = val_ds.land_mask.numpy().astype(bool)
+    if data_mean is not None and data_std is not None:
+        print(f"Normalization : data_mean={data_mean}  data_std={data_std}")
+    else:
+        print("Normalization : none (raw scale)")
+
     diffusion = DDPM(T=T, beta_schedule="cosine", device=device,
                      noise_type=noise_type, spectral_filter=spectral_filter)
-    print(f"Angle model : epoch {ckpt.get('epoch', '?')}  T={T}  noise={noise_type}")
+
+    pred_type = ckpt.get("pred_type", "eps")
+    if pred_type == "x0_streamfn":
+        # Divergence-free stream-function model: predicts x̂₀ directly via the
+        # curl of a scalar stream function.  Wrap it in EpsFromStreamFn so every
+        # downstream sampler (RePaint / PPR / DPS) — all of which expect an
+        # eps-predicting network — works unchanged while the recovered x̂₀ stays
+        # divergence-free by construction.
+        stream_model = StreamFunctionUNet(
+            in_ch=2, base_ch=base_ch, time_dim=time_dim).to(device)
+        stream_model.load_state_dict(ckpt["model"])
+        stream_model.eval()
+        model = EpsFromStreamFn(stream_model, diffusion).to(device)
+        model.eval()
+        print(f"Stream-fn model : epoch {ckpt.get('epoch', '?')}  T={T}  "
+              f"noise={noise_type}  (divergence-free x0)")
+    else:
+        model = UNet(in_ch=2, base_ch=base_ch, time_dim=time_dim).to(device)
+        model.load_state_dict(ckpt["model"])
+        model.eval()
+        print(f"Angle model : epoch {ckpt.get('epoch', '?')}  T={T}  noise={noise_type}")
 
     # ---- Magnitude UNet (optional) ----
     mag = load_magnitude_model(args.mag_checkpoint, device)
@@ -471,6 +622,8 @@ def main():
     print(f"Val samples : {idxs}\n")
 
     angle_errs, cos_sims, mag_rmses = [], [], []
+    all_err, all_dist = [], []
+    member_errs, spread_near, spread_far = [], [], []
     for i, sidx in enumerate(idxs):
         seed      = i * 7 + 1
         x0_true   = val_ds[sidx]
@@ -479,18 +632,52 @@ def main():
         x0_obs    = x0_true.clone()
         x0_obs[:, ~torch.from_numpy(path_mask)] = 0.0
 
-        final_pred, frames = infer_capture(
-            model, diffusion, x0_obs, path_mask, land_np, args, device)
+        final_pred, frames, members = ensemble_infer(
+            model, diffusion, x0_obs, path_mask, land_np, args, device,
+            base_seed=seed)
 
         true_np = x0_true.numpy()
         pred_np = final_pred
         ocean_np = ~land_np
+
+        # Back to physical units for metrics/plots.  Angle is unchanged by this
+        # affine inverse (mean=0 for std-only -> pure rescale, no rotation); for
+        # un-normalized models data_mean is None and this is a no-op.
+        if data_mean is not None and data_std is not None:
+            true_np = true_np * float(data_std) + float(data_mean)
+            pred_np = pred_np * float(data_std) + float(data_mean)
 
         err_map  = angle_error_deg(pred_np, true_np, ocean_np)
         valid    = ~np.isnan(err_map)
         mean_err = float(np.nanmean(err_map))
         cos      = float(np.mean(np.cos(np.radians(err_map[valid])))) if valid.any() else float("nan")
         metrics  = {"mean_err": mean_err, "cos": cos, "mag_rmse": float("nan")}
+
+        # ---- Option D: stratify error by distance-to-path ----
+        dist_map  = distance_to_path(path_mask, ocean_np)
+        all_err.append(err_map[valid])
+        all_dist.append(dist_map[valid])
+        near_sel  = valid & (dist_map <= 2.0)
+        near_mean = float(np.mean(err_map[near_sel])) if near_sel.any() else float("nan")
+
+        # ---- Ensemble: per-member error + directional-uncertainty map ----
+        ens_str = ""
+        if args.n_ensemble > 1:
+            def _unnorm(a):
+                if data_mean is not None and data_std is not None:
+                    return a * float(data_std) + float(data_mean)
+                return a
+            m_errs = [float(np.nanmean(angle_error_deg(_unnorm(m), true_np, ocean_np)))
+                      for m in members]
+            memb_mean = float(np.mean(m_errs))
+            member_errs.append(memb_mean)
+            spread_map = directional_spread([_unnorm(m) for m in members], ocean_np)
+            far_sel = valid & (dist_map > 10.0)
+            sn = float(np.nanmean(spread_map[near_sel])) if near_sel.any() else float("nan")
+            sf = float(np.nanmean(spread_map[far_sel]))  if far_sel.any()  else float("nan")
+            spread_near.append(sn); spread_far.append(sf)
+            ens_str = (f"  [ens{args.n_ensemble}: members={memb_mean:.1f}° "
+                       f"mean={mean_err:.1f}° | spread near={sn:.2f} far={sf:.2f}]")
 
         # ---- Fuse: DDPM direction × UNet magnitude ----
         fused_np = None
@@ -517,7 +704,7 @@ def main():
         angle_errs.append(mean_err); cos_sims.append(cos)
         extra = f"  magRMSE={metrics['mag_rmse']:.4f}" if mag is not None else ""
         print(f"[{i+1}/{len(idxs)}] sample {sidx}: mean_err={mean_err:.1f}°  "
-              f"cos={cos:.3f}{extra}")
+              f"near(≤2)={near_mean:.1f}°  cos={cos:.3f}{extra}{ens_str}")
         print(f"         summary: {summary_path}")
         if gif_path:
             print(f"         gif    : {gif_path}")
@@ -529,6 +716,35 @@ def main():
     print(f"  Mean cosine sim    : {np.mean(cos_sims):.3f}")
     if mag_rmses:
         print(f"  Mean magnitude RMSE: {np.mean(mag_rmses):.4f}")
+    if args.n_ensemble > 1 and member_errs:
+        print(f"  Ensemble ({args.n_ensemble} draws):")
+        print(f"    Single-member error : {np.mean(member_errs):.1f}°  "
+              f"(avg over members)")
+        print(f"    Posterior-mean error: {np.mean(angle_errs):.1f}°  "
+              f"(Δ {np.mean(member_errs) - np.mean(angle_errs):+.1f}° vs members)")
+        print(f"    Directional spread  : near(≤2)={np.nanmean(spread_near):.2f}  "
+              f"far(>10)={np.nanmean(spread_far):.2f}   (0=agree, 1=scattered)")
+
+    # ---- Option D: aggregate stratified table over all cells of all samples ----
+    if all_err:
+        ev = np.concatenate(all_err); dv = np.concatenate(all_dist)
+        print(f"\n  Stratified by distance-to-path (all {ev.size} scored cells):")
+        print(f"    {'band':<14}{'cells':>8}{'mean err':>11}{'cos':>9}")
+        for label, n, me, c in stratified_rows(ev, dv):
+            if n:
+                print(f"    {label:<14}{n:>8}{me:>10.1f}°{c:>9.3f}")
+            else:
+                print(f"    {label:<14}{n:>8}{'n/a':>11}{'n/a':>9}")
+
+        # Coverage-fair headline: exclude observed cells (dist<=2) so the
+        # overall number is not skewed downward by simply observing more cells.
+        unobs = dv > 2.0
+        if unobs.any():
+            uo = ev[unobs]
+            print(f"\n  Unobserved-only (dist>2): {np.mean(uo):.1f}°  "
+                  f"cos={np.mean(np.cos(np.radians(uo))):.3f}  "
+                  f"({uo.size} cells, excludes near band)")
+
     print(f"\n  Output dir: {args.out_dir}")
 
 

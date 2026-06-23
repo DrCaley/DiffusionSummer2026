@@ -269,6 +269,73 @@ class DDPM:
         return total, eps_loss, indiv
 
     # ------------------------------------------------------------------
+    # Training — stream-function (divergence-free) calibrated model
+    # ------------------------------------------------------------------
+
+    def training_loss_streamfn(
+        self,
+        model:         torch.nn.Module,
+        x0:            torch.Tensor,
+        land_mask:     torch.Tensor,
+        lambda_angle:  float = 1.0,
+        min_snr_gamma: float = 5.0,
+        cond:          torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        Calibrated x0-prediction loss for the stream-function model.
+
+        The model (StreamFunctionUNet) returns x̂₀ directly as a divergence-free
+        field (the curl of its scalar stream function).  It is supervised with a
+        Min-SNR-γ–weighted reconstruction MSE plus an angle (direction) term:
+
+            L = w_t · ‖x̂₀ − x₀‖²_ocean  +  λ · (1 − cosθ)_ocean
+
+        where  w_t = min(SNR_t, γ) / mean(min(SNR_t, γ))  is the Min-SNR-γ weight
+        (Hang et al., 2023).  Clamping the SNR recovers the noise-level balancing
+        that motivates v-prediction while keeping the stream-function (x0-space)
+        parameterisation that guarantees incompressibility.  The angle term keeps
+        flow direction — the eddy-detection north star — first-class.
+
+        Args:
+            model:         StreamFunctionUNet predicting the clean field x̂₀.
+            x0:            (B, 2, H, W) clean fields.
+            land_mask:     (H, W) bool, True = land (excluded from loss).
+            lambda_angle:  weight λ on the directional (1−cosθ) term.
+            min_snr_gamma: Min-SNR clamp γ (paper default 5.0).
+            cond:          (B, C, H, W) optional conditioning channels passed to
+                           the model (for the conditional stream-function variant).
+                           None for the unconditional model.
+
+        Returns:
+            (total, recon_mse, indiv)
+            total:     scalar loss used for backprop
+            recon_mse: unweighted masked reconstruction MSE (for logging)
+            indiv:     {"angle": value}
+        """
+        B = x0.shape[0]
+        t = torch.randint(0, self.T, (B,), device=self.device)
+        xt, _ = self.q_sample(x0, t)
+        x0_pred = model(xt, t) if cond is None else model(xt, t, cond)   # div-free x̂₀
+
+        ocean = (~land_mask).float()[None, None]     # (1, 1, H, W)
+        denom = (ocean.sum() * B).clamp(min=1.0)
+
+        # Min-SNR-γ timestep weight (per sample)
+        ab  = self.alpha_bar[t]
+        snr = ab / (1.0 - ab).clamp(min=1e-8)
+        w   = snr.clamp(max=min_snr_gamma)
+        w   = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+
+        se        = ((x0_pred - x0) * ocean) ** 2     # (B, 2, H, W)
+        recon_mse = se.sum() / denom                  # unweighted (logging)
+        weighted  = (w * se).sum() / denom            # Min-SNR weighted (backprop)
+
+        ang   = _lf_mod.angle_loss(x0_pred, x0, ocean)
+        total = weighted + lambda_angle * ang
+        return total, recon_mse, {"angle": ang}
+
+
+    # ------------------------------------------------------------------
     # Inference schedule helper
     # ------------------------------------------------------------------
 
@@ -373,3 +440,47 @@ class DDPM:
         ab_prev = self.alpha_bar[t_prev_int]
         ratio   = ab_t / ab_prev
         return ratio.sqrt() * x_prev + (1.0 - ratio).sqrt() * self.noise_scale * self._sample_noise(x_prev)
+
+
+# ---------------------------------------------------------------------------
+# Inference adapter: stream-function (x0) model → epsilon-equivalent
+# ---------------------------------------------------------------------------
+
+class EpsFromStreamFn(torch.nn.Module):
+    """
+    Wrap a stream-function (x0-prediction) model so it exposes an
+    *epsilon-equivalent* output, letting it drop into any sampler that expects
+    an eps-predicting network (p_sample_step, RePaint, PPR, DPS) with no other
+    change.
+
+        x̂₀(x_t, t) = stream_model(x_t, t)               (divergence-free field)
+        ε̂(x_t, t) = (x_t − √ᾱ_t · x̂₀) / √(1 − ᾱ_t)
+
+    Any sampler that reconstructs x̂₀ = (x_t − √(1−ᾱ_t)·ε̂)/√ᾱ_t recovers
+    exactly the divergence-free model field, so divergence-free structure is
+    preserved through the reverse process.
+    """
+
+    def __init__(self, stream_model: torch.nn.Module, diffusion: "DDPM",
+                 cond: torch.Tensor | None = None):
+        super().__init__()
+        self.stream_model = stream_model
+        self._ab = diffusion.alpha_bar
+        # Optional fixed conditioning (obs + temporal priors + geometry).  It is
+        # constant across the reverse process for a given sample, so it is set
+        # once here and threaded into every model call.  None => unconditional.
+        self.cond = cond
+
+    def forward(self, xt: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        if self.cond is None:
+            x0 = self.stream_model(xt, t)
+        else:
+            cond = self.cond
+            if cond.shape[0] != xt.shape[0]:           # broadcast to batch
+                cond = cond.expand(xt.shape[0], *cond.shape[1:])
+            x0 = self.stream_model(xt, t, cond)
+        ab = self._ab[t][:, None, None, None]
+        sqrt_ab  = ab.sqrt()
+        sqrt_mab = (1.0 - ab).sqrt().clamp(min=1e-8)
+        return (xt - sqrt_ab * x0) / sqrt_mab
+

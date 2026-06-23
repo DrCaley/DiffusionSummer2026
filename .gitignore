@@ -1,6 +1,7 @@
 # Datasets — pickle files are too large for GitHub
 data.pickle
 Datasets/*.pickle
+Datasets/*.mat
 
 # Spectral filter is small (16 KB) and IS tracked
 !Datasets/spectral_filter.npy
