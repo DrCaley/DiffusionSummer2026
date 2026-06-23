@@ -1,3 +1,0 @@
-REMOTE_OK
-    PID     ELAPSED %CPU CMD
- 181887       01:13  134 python3 train.py --epochs 400 --batch 32 --lr 2e-4 --timesteps 1000 --noise-type divergence_free --save-every 100 --run-dir checkpoints/conditional_inpainting_2026-06-14 --path-steps 150

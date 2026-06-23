@@ -1,0 +1,115 @@
+Device      : cuda
+Checkpoint  : Stride/checkpoints_geometric/best_model_geometric.pt
+Strides     : [1, 5, 10, 20, 50]
+N samples   : 10
+Loaded      : epoch 85, val_loss=0.00049, curl_div_weight=0.002, noise_std=0.11619
+
+Sample 1/10  (test idx=0)
+  stride=  1  (1000 steps)  RMSE=0.1684
+  stride=  5  ( 200 steps)  RMSE=0.1478
+  stride= 10  ( 100 steps)  RMSE=0.1261
+  stride= 20  (  50 steps)  RMSE=0.0973
+  stride= 50  (  20 steps)  RMSE=0.1398
+    Saved: Stride/results/images_geometric/result_01_all_strides.png
+
+Sample 2/10  (test idx=1)
+  stride=  1  (1000 steps)  RMSE=0.0810
+  stride=  5  ( 200 steps)  RMSE=0.0998
+  stride= 10  ( 100 steps)  RMSE=0.0838
+  stride= 20  (  50 steps)  RMSE=0.0728
+  stride= 50  (  20 steps)  RMSE=0.0940
+    Saved: Stride/results/images_geometric/result_02_all_strides.png
+
+Sample 3/10  (test idx=2)
+  stride=  1  (1000 steps)  RMSE=0.1033
+  stride=  5  ( 200 steps)  RMSE=0.0918
+  stride= 10  ( 100 steps)  RMSE=0.1141
+  stride= 20  (  50 steps)  RMSE=0.1159
+  stride= 50  (  20 steps)  RMSE=0.0941
+    Saved: Stride/results/images_geometric/result_03_all_strides.png
+
+Sample 4/10  (test idx=3)
+  stride=  1  (1000 steps)  RMSE=0.1196
+  stride=  5  ( 200 steps)  RMSE=0.1090
+  stride= 10  ( 100 steps)  RMSE=0.1168
+  stride= 20  (  50 steps)  RMSE=0.1086
+  stride= 50  (  20 steps)  RMSE=0.1060
+    Saved: Stride/results/images_geometric/result_04_all_strides.png
+
+Sample 5/10  (test idx=4)
+  stride=  1  (1000 steps)  RMSE=0.1066
+  stride=  5  ( 200 steps)  RMSE=0.0886
+  stride= 10  ( 100 steps)  RMSE=0.1253
+  stride= 20  (  50 steps)  RMSE=0.0863
+  stride= 50  (  20 steps)  RMSE=0.0821
+    Saved: Stride/results/images_geometric/result_05_all_strides.png
+
+Sample 6/10  (test idx=5)
+  stride=  1  (1000 steps)  RMSE=0.1737
+  stride=  5  ( 200 steps)  RMSE=0.1818
+  stride= 10  ( 100 steps)  RMSE=0.1405
+  stride= 20  (  50 steps)  RMSE=0.1382
+  stride= 50  (  20 steps)  RMSE=0.1029
+    Saved: Stride/results/images_geometric/result_06_all_strides.png
+
+Sample 7/10  (test idx=6)
+  stride=  1  (1000 steps)  RMSE=0.2016
+  stride=  5  ( 200 steps)  RMSE=0.2317
+  stride= 10  ( 100 steps)  RMSE=0.1795
+  stride= 20  (  50 steps)  RMSE=0.2309
+  stride= 50  (  20 steps)  RMSE=0.1964
+    Saved: Stride/results/images_geometric/result_07_all_strides.png
+
+Sample 8/10  (test idx=7)
+  stride=  1  (1000 steps)  RMSE=0.2548
+  stride=  5  ( 200 steps)  RMSE=0.2446
+  stride= 10  ( 100 steps)  RMSE=0.2309
+  stride= 20  (  50 steps)  RMSE=0.2195
+  stride= 50  (  20 steps)  RMSE=0.2202
+    Saved: Stride/results/images_geometric/result_08_all_strides.png
+
+Sample 9/10  (test idx=8)
+  stride=  1  (1000 steps)  RMSE=0.1692
+  stride=  5  ( 200 steps)  RMSE=0.1806
+  stride= 10  ( 100 steps)  RMSE=0.1686
+  stride= 20  (  50 steps)  RMSE=0.1504
+  stride= 50  (  20 steps)  RMSE=0.1793
+    Saved: Stride/results/images_geometric/result_09_all_strides.png
+
+Sample 10/10  (test idx=9)
+  stride=  1  (1000 steps)  RMSE=0.2575
+  stride=  5  ( 200 steps)  RMSE=0.2557
+  stride= 10  ( 100 steps)  RMSE=0.2133
+  stride= 20  (  50 steps)  RMSE=0.2540
+  stride= 50  (  20 steps)  RMSE=0.2445
+    Saved: Stride/results/images_geometric/result_10_all_strides.png
+
+Geometric schedule stride comparison
+Checkpoint       : Stride/checkpoints_geometric/best_model_geometric.pt
+curl_div_weight  : 0.002
+noise_std        : 0.11619
+N samples  : 10
+resample r : 10
+path_steps : 150
+
+  Stride   Steps   Mean RMSE       Std       Min       Max
+--------------------------------------------------------
+       1    1000      0.1636    0.0586    0.0810    0.2575
+       5     200      0.1631    0.0619    0.0886    0.2557
+      10     100      0.1499    0.0445    0.0838    0.2309
+      20      50      0.1474    0.0616    0.0728    0.2540
+      50      20      0.1459    0.0564    0.0821    0.2445
+
+Per-sample breakdown:
+  sample   0: s1=0.1684  s5=0.1478  s10=0.1261  s20=0.0973  s50=0.1398
+  sample   1: s1=0.0810  s5=0.0998  s10=0.0838  s20=0.0728  s50=0.0940
+  sample   2: s1=0.1033  s5=0.0918  s10=0.1141  s20=0.1159  s50=0.0941
+  sample   3: s1=0.1196  s5=0.1090  s10=0.1168  s20=0.1086  s50=0.1060
+  sample   4: s1=0.1066  s5=0.0886  s10=0.1253  s20=0.0863  s50=0.0821
+  sample   5: s1=0.1737  s5=0.1818  s10=0.1405  s20=0.1382  s50=0.1029
+  sample   6: s1=0.2016  s5=0.2317  s10=0.1795  s20=0.2309  s50=0.1964
+  sample   7: s1=0.2548  s5=0.2446  s10=0.2309  s20=0.2195  s50=0.2202
+  sample   8: s1=0.1692  s5=0.1806  s10=0.1686  s20=0.1504  s50=0.1793
+  sample   9: s1=0.2575  s5=0.2557  s10=0.2133  s20=0.2540  s50=0.2445
+
+Saved: Stride/results/stride_comparison_geometric.txt

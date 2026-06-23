@@ -1,0 +1,118 @@
+NoiseSchedule RePaint Model Comparison — 100 Epoch Models
+==========================================================
+Date: June 5, 2026 (cosine variants added June 12, 2026; reviewed June 15, 2026)
+
+Architecture: RePaint UNet (same backbone across all schedules), 94x44 grid
+Dataset: Ocean current fields (u, v), validation set (10 samples)
+Inference: RePaint algorithm, r=10 resampling, 150-step biased walk path, T=1000
+
+-----------------------------------------------------------------------
+Model A: Linear noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/linear/checkpoints_repaint_linear/best_model_linear.pt
+  Best epoch: 100
+  Results folder: NoiseSchedule/epoch_100_models/linear/model_linear_results/
+
+  Run RMSEs: 0.1466, 0.1984, 0.1822, 0.0834, 0.1620,
+             0.5267, 0.1196, 0.1453, 0.1931, 0.6395
+  Mean RMSE : 0.2397   Std: 0.1766
+
+-----------------------------------------------------------------------
+Model B: Cosine noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/cosine/checkpoints_repaint_cosine/best_model_cosine.pt
+  Best epoch: 100
+  Results folder: NoiseSchedule/epoch_100_models/cosine/model_cosine_results/
+
+  Run RMSEs: 0.0845, 0.2156, 0.2307, 0.1914, 0.0954,
+             0.2764, 0.1164, 0.1699, 0.1487, 0.1630
+  Mean RMSE : 0.1692   Std: 0.0581
+
+-----------------------------------------------------------------------
+Model C: Quadratic noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/quadratic/checkpoints_repaint_quadratic/best_model_quadratic.pt
+  Best epoch: 89
+  Results folder: NoiseSchedule/epoch_100_models/quadratic/model_quadratic_results/
+
+  Run RMSEs: 0.1128, 0.0838, 0.1784, 0.1055, 0.1545,
+             0.0974, 0.0632, 0.1416, 0.1121, 0.0976
+  Mean RMSE : 0.1147   Std: 0.0326
+
+-----------------------------------------------------------------------
+Model D: Sigmoid noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/sigmoid/checkpoints_repaint_sigmoid/best_model_sigmoid.pt
+  Best epoch: 90
+  Results folder: NoiseSchedule/epoch_100_models/sigmoid/model_sigmoid_results/
+
+  Run RMSEs: 0.1316, 0.1899, 0.1918, 0.0677, 0.1534,
+             0.2528, 0.1183, 0.1052, 0.0488, 0.0979
+  Mean RMSE : 0.1357   Std: 0.0591
+
+-----------------------------------------------------------------------
+Model E: Geometric / Exponential noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/geometric/checkpoints_repaint_geometric/best_model_geometric.pt
+  Best epoch: 78
+  Results folder: NoiseSchedule/epoch_100_models/geometric/model_geometric_results/
+
+  Run RMSEs: 0.1841, 0.1895, 0.1951, 0.1564, 0.1720,
+             0.2157, 0.1106, 0.0890, 0.1424, 0.1800
+  Mean RMSE : 0.1635   Std: 0.0374
+
+-----------------------------------------------------------------------
+Model F: Cosine s=0.001 noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/cosine_s0001/checkpoints_repaint_cosine_s0001/best_model_cosine_s0001.pt
+  Best epoch: 94
+  Results folder: NoiseSchedule/epoch_100_models/cosine_s0001/model_cosine_s0001_results/
+
+  Run RMSEs: 0.1523, 0.1742, 0.1540, 0.0973, 0.0764,
+             0.1615, 0.0764, 0.1000, 0.0646, 0.1199
+  Mean RMSE : 0.1177   Std: 0.0382
+
+-----------------------------------------------------------------------
+Model G: Cosine s=0.02 noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/cosine_s02/checkpoints_repaint_cosine_s02/best_model_cosine_s02.pt
+  Best epoch: 83
+  Results folder: NoiseSchedule/epoch_100_models/cosine_s02/model_cosine_s02_results/
+
+  Run RMSEs: 0.1269, 0.0727, 0.1108, 0.0897, 0.0923,
+             0.1217, 0.1016, 0.1107, 0.0858, 0.1154
+  Mean RMSE : 0.1028   Std: 0.0164
+
+-----------------------------------------------------------------------
+Model H: Cosine s=0.10 noise schedule
+  Checkpoint: NoiseSchedule/epoch_100_models/cosine_s10/checkpoints_repaint_cosine_s10/best_model_cosine_s10.pt
+  Best epoch: 99
+  Results folder: NoiseSchedule/epoch_100_models/cosine_s10/model_cosine_s10_results/
+
+  Run RMSEs: 0.1244, 0.1587, 0.1100, 0.0893, 0.0772,
+             0.3866, 0.0940, 0.1310, 0.1641, 0.2926
+  Mean RMSE : 0.1628   Std: 0.0947
+
+-----------------------------------------------------------------------
+Summary Table (Mean RMSE, lower is better):
+
+  Schedule      | Mean RMSE | Std    | Best epoch |
+  --------------|-----------|--------|------------|
+  Linear        |  0.2397   | 0.1766 |    100     |
+  Cosine        |  0.1692   | 0.0581 |    100     |
+  Cosine s=0.10 |  0.1628   | 0.0947 |     99     |
+  Geometric     |  0.1635   | 0.0374 |     78     |
+  Sigmoid       |  0.1357   | 0.0591 |     90     |
+  Cosine s=0.001|  0.1177   | 0.0382 |     94     |
+  Quadratic     |  0.1147   | 0.0326 |     89     |
+  Cosine s=0.02 |  0.1028   | 0.0164 |     83     |
+  --------------|-----------|--------|------------|
+
+Key observations:
+- Cosine s=0.02 achieves the best mean RMSE (0.1028) with the lowest variance (Std=0.0164),
+  making it the most consistent and accurate schedule across all 8 tested
+- Quadratic is a close second (0.1147, Std=0.0326) — previously ranked best before cosine
+  variants were included
+- Cosine s=0.001 (0.1177) slots just below quadratic, outperforming standard cosine by a
+  large margin, suggesting the smaller offset s helps in this domain
+- Sigmoid (0.1357) remains competitive; Cosine s=0.10 (0.1628) and Geometric (0.1635)
+  perform similarly in mean RMSE but Cosine s=0.10 has far higher variance (Std=0.0947),
+  driven by two outlier runs (result_06: 0.3866, result_10: 0.2926)
+- Standard Cosine (0.1692) is mid-tier; the tuned s variants clearly improve on it
+- Linear remains worst (0.2397) with very high variance (Std=0.1766)
+- The s parameter in cosine schedules spans s=0.001, s=0.02, s=0.10 in these experiments;
+  at 100 epochs the sweet spot is s=0.02 — s=0.10 underperforms here, likely because its
+  larger offset requires more training to converge (confirmed by the 300-epoch results)

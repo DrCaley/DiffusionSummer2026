@@ -1,2 +1,0 @@
-REMOTE_OK
-    PID     ELAPSED %CPU CMD

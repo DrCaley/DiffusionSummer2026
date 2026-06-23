@@ -1,0 +1,33 @@
+Device      : cuda
+eps  ckpt   : checkpoints/best_model.pt
+cond ckpt   : Conditional DDPM/checkpoints_voronoi/best_cond_ddpm_voronoi_cosine.pt
+Output dir  : /root/ocean_diffusion/Conditional DDPM/results_compare
+Val samples : [1663, 1598, 1246, 1000, 528, 80, 32, 603, 344, 147]
+eps  model  : epoch=155  val_loss=0.00327
+cond model  : epoch=278  val_loss=0.00330
+  [ 1/10] sample=1663  eps RMSE=0.0859  cond RMSE=0.1595
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_01_idx1663.png
+  [ 2/10] sample=1598  eps RMSE=0.1009  cond RMSE=0.1372
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_02_idx1598.png
+  [ 3/10] sample=1246  eps RMSE=0.1336  cond RMSE=0.0796
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_03_idx1246.png
+  [ 4/10] sample=1000  eps RMSE=0.0489  cond RMSE=0.1031
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_04_idx1000.png
+  [ 5/10] sample=528  eps RMSE=0.3306  cond RMSE=0.0997
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_05_idx528.png
+  [ 6/10] sample=80  eps RMSE=0.0771  cond RMSE=0.1165
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_06_idx80.png
+  [ 7/10] sample=32  eps RMSE=0.0683  cond RMSE=0.0948
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_07_idx32.png
+  [ 8/10] sample=603  eps RMSE=0.1380  cond RMSE=0.1409
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_08_idx603.png
+  [ 9/10] sample=344  eps RMSE=0.1323  cond RMSE=0.0893
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_09_idx344.png
+  [10/10] sample=147  eps RMSE=0.1650  cond RMSE=0.0732
+           saved → /root/ocean_diffusion/Conditional DDPM/results_compare/compare_10_idx147.png
+
+────────────────────────────────────────────────────────
+  eps  Mean RMSE : 0.1281  ±0.0758
+  cond Mean RMSE : 0.1094  ±0.0270
+────────────────────────────────────────────────────────
+Summary saved → /root/ocean_diffusion/Conditional DDPM/results_compare/rmse_summary.png

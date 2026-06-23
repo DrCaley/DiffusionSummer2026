@@ -1,5 +1,0 @@
-REMOTE_OK
-/root/Model_TrueDivergentFreeNoise/actual_sample_3.png
-/root/Model_TrueDivergentFreeNoise/loss_sample_3.png
-/root/Model_TrueDivergentFreeNoise/overview_sample_3.png
-/root/Model_TrueDivergentFreeNoise/predicted_sample_3.png

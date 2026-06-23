@@ -17,7 +17,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset  import OceanCurrentDataset
-from diffusion import DDPM, LOSS_MODES, DEFAULT_WEIGHTS
+from diffusion import DDPM, LOSS_MODES, NOISE_TYPES, DEFAULT_WEIGHTS
 from model    import UNet
 
 
@@ -34,8 +34,9 @@ def parse_args():
     p.add_argument("--base_ch",  type=int,   default=64)
     p.add_argument("--time_dim", type=int,   default=256)
     p.add_argument("--T",        type=int,   default=1000)
-    p.add_argument("--noise_type", default="gaussian", choices=["gaussian"],
-                   help="Type of noise used in the forward process (default: gaussian)")
+    p.add_argument("--noise_type", default="gaussian", choices=list(NOISE_TYPES),
+                   help="Noise type for the forward process: 'gaussian' (default) or "
+                        "'div_free' (divergence-free via Fourier projection)")
     p.add_argument("--schedule",   default="cosine", choices=["cosine", "linear"],
                    help="Noise schedule (default: cosine)")
     p.add_argument("--loss",    default=["eps"], choices=LOSS_MODES, nargs="+",
@@ -44,8 +45,17 @@ def parse_args():
                    help="Per-loss weights, one per non-eps entry in --loss "
                         "(in the same order). Omit to use defaults.")
     p.add_argument("--sinkhorn_blur", type=float, default=0.05)
-    p.add_argument("--save_dir", default="checkpoints")
+    p.add_argument("--noise_scale", type=float, default=1.0,
+                   help="Std dev of the Gaussian noise in the forward process. "
+                        "Set to ~0.12 to match the data scale (default: 1.0 = standard DDPM).")
+    p.add_argument("--save_dir", default="models")
     p.add_argument("--workers",  type=int,   default=0)
+    p.add_argument("--spectral_filter", default=None,
+                   help="Path to spectral_filter.npy for colored div-free noise. "
+                        "Only used when --noise_type div_free.")
+    p.add_argument("--normalize", action="store_true",
+                   help="Normalize data to unit std (ocean cells) before training. "
+                        "Stats are saved in the checkpoint for inference.")
     return p.parse_args()
 
 
@@ -77,8 +87,16 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     # ---- Data ----
-    train_ds = OceanCurrentDataset(args.pickle, split=0)
-    val_ds   = OceanCurrentDataset(args.pickle, split=1)
+    if args.normalize:
+        data_mean, data_std = OceanCurrentDataset.compute_stats(args.pickle, split=0)
+        print(f"Normalizing data: mean={data_mean:.5f}  std={data_std:.5f}")
+    else:
+        data_mean = data_std = None
+
+    train_ds = OceanCurrentDataset(args.pickle, split=0,
+                                   data_mean=data_mean, data_std=data_std)
+    val_ds   = OceanCurrentDataset(args.pickle, split=1,
+                                   data_mean=data_mean, data_std=data_std)
 
     land_mask = train_ds.land_mask.to(device)   # (H, W) bool
 
@@ -96,21 +114,35 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
+    # ---- Load optional spectral filter ----
+    spec_filter_tensor = None
+    if args.spectral_filter:
+        import numpy as np
+        spec_filter_tensor = torch.from_numpy(
+            np.load(args.spectral_filter).astype(np.float32)
+        )
+        print(f"Spectral filter: {args.spectral_filter}  shape={tuple(spec_filter_tensor.shape)}")
+
     diffusion = DDPM(
         T=args.T,
         beta_schedule=args.schedule,
         device=device,
+        noise_type=args.noise_type,
         loss_types=args.loss,
         weights=weights,
         sinkhorn_blur=args.sinkhorn_blur,
+        spectral_filter=spec_filter_tensor,
+        noise_scale=args.noise_scale,
     )
+    print(f"Noise scale: {args.noise_scale}")
 
     # ---- Optimiser ----
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
     # ---- Run tag: ddpm_{losses}_{noise_type}_{schedule} ----
-    run_tag = f"ddpm_{'+'.join(args.loss)}_{args.noise_type}_{args.schedule}"
+    ns_tag  = f"_ns{args.noise_scale:.2f}".replace(".", "p") if args.noise_scale != 1.0 else ""
+    run_tag = f"ddpm_{'+'.join(args.loss)}_{args.noise_type}_{args.schedule}{ns_tag}"
 
     # ---- Training loop ----
     best_val  = float("inf")
@@ -161,13 +193,17 @@ def main():
             torch.save(
                 {"epoch": epoch, "model": model.state_dict(),
                  "val_loss": val_total, "val_eps": val_eps,
-                 "val_indiv": val_indiv, "args": vars(args)},
+                 "val_indiv": val_indiv, "args": vars(args),
+                 "spectral_filter": diffusion.spectral_filter,
+                 "data_mean": data_mean, "data_std": data_std},
                 os.path.join(args.save_dir, f"best_{run_tag}.pt"),
             )
 
         if epoch % 10 == 0:
             torch.save(
-                {"epoch": epoch, "model": model.state_dict(), "args": vars(args)},
+                {"epoch": epoch, "model": model.state_dict(), "args": vars(args),
+                 "spectral_filter": diffusion.spectral_filter,
+                 "data_mean": data_mean, "data_std": data_std},
                 os.path.join(args.save_dir, f"ckpt_ep{epoch:04d}_{run_tag}.pt"),
             )
 

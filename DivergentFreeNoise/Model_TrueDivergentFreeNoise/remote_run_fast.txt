@@ -1,3 +1,0 @@
-Saved figures to /root/Model_TrueDivergentFreeNoise
-RMSE=81.662457 MAE=103.059578
-RMSE skip-last=263.353775 MAE skip-last=338.919373

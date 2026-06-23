@@ -1,4 +1,0 @@
-checkpoints
-journal.md
-train.pid
-train_stdout.log

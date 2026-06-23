@@ -1,0 +1,515 @@
+Device: cuda
+
+Evaluating 50 val samples: [124, 133, 165, 171, 179, 181, 247, 323, 353, 387]...
+
+  Loaded model 'eps'  (epoch 172, T=1000, sched=cosine)
+  Loaded model 'curl_div'  (epoch 173, T=1000, sched=cosine)
+  Loaded model 'spectral'  (epoch 179, T=1000, sched=cosine)
+  Loaded model 'okubo_weiss'  (epoch 147, T=1000, sched=cosine)
+  Loaded model 'wasserstein'  (epoch 195, T=1000, sched=cosine)
+  Loaded model 'stream_function'  (epoch 392, T=1000, sched=cosine)
+  Loaded model 'strain_rate'  (epoch 391, T=1000, sched=cosine)
+
+[  1/50] Val sample 124
+    eps               eps_mean=0.06857
+    curl_div          eps_mean=0.06100
+    spectral          eps_mean=0.10853
+    okubo_weiss       eps_mean=0.06475
+    wasserstein       eps_mean=0.05467
+    stream_function   eps_mean=0.06910
+    strain_rate       eps_mean=0.06404
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_124.png
+
+[  2/50] Val sample 133
+    eps               eps_mean=0.07566
+    curl_div          eps_mean=0.06261
+    spectral          eps_mean=0.12159
+    okubo_weiss       eps_mean=0.16323
+    wasserstein       eps_mean=0.07559
+    stream_function   eps_mean=0.10942
+    strain_rate       eps_mean=0.10997
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_133.png
+
+[  3/50] Val sample 165
+    eps               eps_mean=0.10596
+    curl_div          eps_mean=0.09215
+    spectral          eps_mean=0.15234
+    okubo_weiss       eps_mean=0.17736
+    wasserstein       eps_mean=0.09071
+    stream_function   eps_mean=0.11977
+    strain_rate       eps_mean=0.13727
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_165.png
+
+[  4/50] Val sample 171
+    eps               eps_mean=0.06052
+    curl_div          eps_mean=0.04706
+    spectral          eps_mean=0.07814
+    okubo_weiss       eps_mean=0.09786
+    wasserstein       eps_mean=0.05466
+    stream_function   eps_mean=0.07820
+    strain_rate       eps_mean=0.08331
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_171.png
+
+[  5/50] Val sample 179
+    eps               eps_mean=0.06160
+    curl_div          eps_mean=0.05239
+    spectral          eps_mean=0.11089
+    okubo_weiss       eps_mean=0.04218
+    wasserstein       eps_mean=0.05218
+    stream_function   eps_mean=0.06597
+    strain_rate       eps_mean=0.06085
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_179.png
+
+[  6/50] Val sample 181
+    eps               eps_mean=0.07906
+    curl_div          eps_mean=0.06642
+    spectral          eps_mean=0.13770
+    okubo_weiss       eps_mean=0.08307
+    wasserstein       eps_mean=0.06276
+    stream_function   eps_mean=0.07745
+    strain_rate       eps_mean=0.07554
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_181.png
+
+[  7/50] Val sample 247
+    eps               eps_mean=0.07048
+    curl_div          eps_mean=0.07308
+    spectral          eps_mean=0.14814
+    okubo_weiss       eps_mean=0.05916
+    wasserstein       eps_mean=0.06512
+    stream_function   eps_mean=0.05249
+    strain_rate       eps_mean=0.05839
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_247.png
+
+[  8/50] Val sample 323
+    eps               eps_mean=0.08404
+    curl_div          eps_mean=0.06224
+    spectral          eps_mean=0.13389
+    okubo_weiss       eps_mean=0.04728
+    wasserstein       eps_mean=0.06216
+    stream_function   eps_mean=0.07506
+    strain_rate       eps_mean=0.07553
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_323.png
+
+[  9/50] Val sample 353
+    eps               eps_mean=0.09978
+    curl_div          eps_mean=0.07393
+    spectral          eps_mean=0.17611
+    okubo_weiss       eps_mean=0.11347
+    wasserstein       eps_mean=0.07532
+    stream_function   eps_mean=0.09947
+    strain_rate       eps_mean=0.10287
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_353.png
+
+[ 10/50] Val sample 387
+    eps               eps_mean=0.05750
+    curl_div          eps_mean=0.04778
+    spectral          eps_mean=0.09574
+    okubo_weiss       eps_mean=0.09566
+    wasserstein       eps_mean=0.06144
+    stream_function   eps_mean=0.07055
+    strain_rate       eps_mean=0.06522
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_387.png
+
+[ 11/50] Val sample 442
+    eps               eps_mean=0.07695
+    curl_div          eps_mean=0.08015
+    spectral          eps_mean=0.12956
+    okubo_weiss       eps_mean=0.10153
+    wasserstein       eps_mean=0.08242
+    stream_function   eps_mean=0.08242
+    strain_rate       eps_mean=0.09560
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_442.png
+
+[ 12/50] Val sample 540
+    eps               eps_mean=0.06267
+    curl_div          eps_mean=0.06132
+    spectral          eps_mean=0.10626
+    okubo_weiss       eps_mean=0.06560
+    wasserstein       eps_mean=0.06392
+    stream_function   eps_mean=0.07242
+    strain_rate       eps_mean=0.06626
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_540.png
+
+[ 13/50] Val sample 694
+    eps               eps_mean=0.10872
+    curl_div          eps_mean=0.09773
+    spectral          eps_mean=0.17156
+    okubo_weiss       eps_mean=0.11599
+    wasserstein       eps_mean=0.08908
+    stream_function   eps_mean=0.11308
+    strain_rate       eps_mean=0.11799
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_694.png
+
+[ 14/50] Val sample 718
+    eps               eps_mean=0.08494
+    curl_div          eps_mean=0.07333
+    spectral          eps_mean=0.08727
+    okubo_weiss       eps_mean=0.08365
+    wasserstein       eps_mean=0.07228
+    stream_function   eps_mean=0.08556
+    strain_rate       eps_mean=0.09902
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_718.png
+
+[ 15/50] Val sample 781
+    eps               eps_mean=0.09726
+    curl_div          eps_mean=0.11477
+    spectral          eps_mean=0.16791
+    okubo_weiss       eps_mean=0.09195
+    wasserstein       eps_mean=0.11327
+    stream_function   eps_mean=0.07318
+    strain_rate       eps_mean=0.08648
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_781.png
+
+[ 16/50] Val sample 831
+    eps               eps_mean=0.05741
+    curl_div          eps_mean=0.06714
+    spectral          eps_mean=0.11050
+    okubo_weiss       eps_mean=0.06332
+    wasserstein       eps_mean=0.05966
+    stream_function   eps_mean=0.05560
+    strain_rate       eps_mean=0.07220
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_831.png
+
+[ 17/50] Val sample 842
+    eps               eps_mean=0.10729
+    curl_div          eps_mean=0.10333
+    spectral          eps_mean=0.15890
+    okubo_weiss       eps_mean=0.10684
+    wasserstein       eps_mean=0.11013
+    stream_function   eps_mean=0.09652
+    strain_rate       eps_mean=0.09154
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_842.png
+
+[ 18/50] Val sample 862
+    eps               eps_mean=0.12321
+    curl_div          eps_mean=0.12114
+    spectral          eps_mean=0.24283
+    okubo_weiss       eps_mean=0.10643
+    wasserstein       eps_mean=0.12119
+    stream_function   eps_mean=0.09960
+    strain_rate       eps_mean=0.11268
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_862.png
+
+[ 19/50] Val sample 871
+    eps               eps_mean=0.08989
+    curl_div          eps_mean=0.08314
+    spectral          eps_mean=0.11252
+    okubo_weiss       eps_mean=0.07293
+    wasserstein       eps_mean=0.07437
+    stream_function   eps_mean=0.08665
+    strain_rate       eps_mean=0.09349
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_871.png
+
+[ 20/50] Val sample 874
+    eps               eps_mean=0.07580
+    curl_div          eps_mean=0.07530
+    spectral          eps_mean=0.09258
+    okubo_weiss       eps_mean=0.10524
+    wasserstein       eps_mean=0.07290
+    stream_function   eps_mean=0.07487
+    strain_rate       eps_mean=0.08085
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_874.png
+
+[ 21/50] Val sample 876
+    eps               eps_mean=0.10472
+    curl_div          eps_mean=0.09460
+    spectral          eps_mean=0.13048
+    okubo_weiss       eps_mean=0.15822
+    wasserstein       eps_mean=0.09089
+    stream_function   eps_mean=0.10785
+    strain_rate       eps_mean=0.11135
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_876.png
+
+[ 22/50] Val sample 968
+    eps               eps_mean=0.08473
+    curl_div          eps_mean=0.06408
+    spectral          eps_mean=0.14106
+    okubo_weiss       eps_mean=0.10201
+    wasserstein       eps_mean=0.06764
+    stream_function   eps_mean=0.10111
+    strain_rate       eps_mean=0.10928
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_968.png
+
+[ 23/50] Val sample 991
+    eps               eps_mean=0.07367
+    curl_div          eps_mean=0.06698
+    spectral          eps_mean=0.10019
+    okubo_weiss       eps_mean=0.06952
+    wasserstein       eps_mean=0.06966
+    stream_function   eps_mean=0.07691
+    strain_rate       eps_mean=0.08562
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_991.png
+
+[ 24/50] Val sample 1013
+    eps               eps_mean=0.06856
+    curl_div          eps_mean=0.06200
+    spectral          eps_mean=0.16318
+    okubo_weiss       eps_mean=0.08099
+    wasserstein       eps_mean=0.06945
+    stream_function   eps_mean=0.07814
+    strain_rate       eps_mean=0.07975
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1013.png
+
+[ 25/50] Val sample 1060
+    eps               eps_mean=0.05334
+    curl_div          eps_mean=0.05041
+    spectral          eps_mean=0.08765
+    okubo_weiss       eps_mean=0.04831
+    wasserstein       eps_mean=0.04937
+    stream_function   eps_mean=0.06235
+    strain_rate       eps_mean=0.06812
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1060.png
+
+[ 26/50] Val sample 1080
+    eps               eps_mean=0.04941
+    curl_div          eps_mean=0.04102
+    spectral          eps_mean=0.08622
+    okubo_weiss       eps_mean=0.04449
+    wasserstein       eps_mean=0.04687
+    stream_function   eps_mean=0.06292
+    strain_rate       eps_mean=0.05606
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1080.png
+
+[ 27/50] Val sample 1234
+    eps               eps_mean=0.06187
+    curl_div          eps_mean=0.05078
+    spectral          eps_mean=0.10523
+    okubo_weiss       eps_mean=0.04871
+    wasserstein       eps_mean=0.06436
+    stream_function   eps_mean=0.06892
+    strain_rate       eps_mean=0.07411
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1234.png
+
+[ 28/50] Val sample 1249
+    eps               eps_mean=0.11335
+    curl_div          eps_mean=0.08642
+    spectral          eps_mean=0.20549
+    okubo_weiss       eps_mean=0.09436
+    wasserstein       eps_mean=0.10148
+    stream_function   eps_mean=0.09569
+    strain_rate       eps_mean=0.09856
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1249.png
+
+[ 29/50] Val sample 1255
+    eps               eps_mean=0.10310
+    curl_div          eps_mean=0.07221
+    spectral          eps_mean=0.20014
+    okubo_weiss       eps_mean=0.12443
+    wasserstein       eps_mean=0.08621
+    stream_function   eps_mean=0.10722
+    strain_rate       eps_mean=0.11373
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1255.png
+
+[ 30/50] Val sample 1331
+    eps               eps_mean=0.08072
+    curl_div          eps_mean=0.07491
+    spectral          eps_mean=0.09915
+    okubo_weiss       eps_mean=0.09517
+    wasserstein       eps_mean=0.06325
+    stream_function   eps_mean=0.06422
+    strain_rate       eps_mean=0.08077
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1331.png
+
+[ 31/50] Val sample 1341
+    eps               eps_mean=0.05993
+    curl_div          eps_mean=0.05870
+    spectral          eps_mean=0.09287
+    okubo_weiss       eps_mean=0.05776
+    wasserstein       eps_mean=0.05368
+    stream_function   eps_mean=0.05441
+    strain_rate       eps_mean=0.05950
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1341.png
+
+[ 32/50] Val sample 1371
+    eps               eps_mean=0.08525
+    curl_div          eps_mean=0.08345
+    spectral          eps_mean=0.11621
+    okubo_weiss       eps_mean=0.11732
+    wasserstein       eps_mean=0.07874
+    stream_function   eps_mean=0.08641
+    strain_rate       eps_mean=0.09564
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1371.png
+
+[ 33/50] Val sample 1384
+    eps               eps_mean=0.06334
+    curl_div          eps_mean=0.06037
+    spectral          eps_mean=0.12750
+    okubo_weiss       eps_mean=0.06008
+    wasserstein       eps_mean=0.05610
+    stream_function   eps_mean=0.05610
+    strain_rate       eps_mean=0.06747
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1384.png
+
+[ 34/50] Val sample 1418
+    eps               eps_mean=0.07697
+    curl_div          eps_mean=0.06549
+    spectral          eps_mean=0.12953
+    okubo_weiss       eps_mean=0.09957
+    wasserstein       eps_mean=0.06952
+    stream_function   eps_mean=0.07693
+    strain_rate       eps_mean=0.07892
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1418.png
+
+[ 35/50] Val sample 1468
+    eps               eps_mean=0.11806
+    curl_div          eps_mean=0.10827
+    spectral          eps_mean=0.17440
+    okubo_weiss       eps_mean=0.09266
+    wasserstein       eps_mean=0.09899
+    stream_function   eps_mean=0.11624
+    strain_rate       eps_mean=0.10688
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1468.png
+
+[ 36/50] Val sample 1483
+    eps               eps_mean=0.06184
+    curl_div          eps_mean=0.04724
+    spectral          eps_mean=0.09787
+    okubo_weiss       eps_mean=0.05352
+    wasserstein       eps_mean=0.05638
+    stream_function   eps_mean=0.06950
+    strain_rate       eps_mean=0.07356
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1483.png
+
+[ 37/50] Val sample 1516
+    eps               eps_mean=0.09490
+    curl_div          eps_mean=0.10934
+    spectral          eps_mean=0.16087
+    okubo_weiss       eps_mean=0.08735
+    wasserstein       eps_mean=0.08355
+    stream_function   eps_mean=0.07015
+    strain_rate       eps_mean=0.07435
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1516.png
+
+[ 38/50] Val sample 1517
+    eps               eps_mean=0.10231
+    curl_div          eps_mean=0.07899
+    spectral          eps_mean=0.17125
+    okubo_weiss       eps_mean=0.11107
+    wasserstein       eps_mean=0.07773
+    stream_function   eps_mean=0.10084
+    strain_rate       eps_mean=0.09852
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1517.png
+
+[ 39/50] Val sample 1529
+    eps               eps_mean=0.07701
+    curl_div          eps_mean=0.06347
+    spectral          eps_mean=0.10804
+    okubo_weiss       eps_mean=0.07171
+    wasserstein       eps_mean=0.05287
+    stream_function   eps_mean=0.07123
+    strain_rate       eps_mean=0.07868
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1529.png
+
+[ 40/50] Val sample 1598
+    eps               eps_mean=0.11502
+    curl_div          eps_mean=0.10845
+    spectral          eps_mean=0.23953
+    okubo_weiss       eps_mean=0.08691
+    wasserstein       eps_mean=0.09391
+    stream_function   eps_mean=0.08821
+    strain_rate       eps_mean=0.09753
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1598.png
+
+[ 41/50] Val sample 1616
+    eps               eps_mean=0.16172
+    curl_div          eps_mean=0.14680
+    spectral          eps_mean=0.29402
+    okubo_weiss       eps_mean=0.09296
+    wasserstein       eps_mean=0.16250
+    stream_function   eps_mean=0.13517
+    strain_rate       eps_mean=0.13551
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1616.png
+
+[ 42/50] Val sample 1624
+    eps               eps_mean=0.05066
+    curl_div          eps_mean=0.04876
+    spectral          eps_mean=0.06487
+    okubo_weiss       eps_mean=0.04215
+    wasserstein       eps_mean=0.04612
+    stream_function   eps_mean=0.06234
+    strain_rate       eps_mean=0.05752
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1624.png
+
+[ 43/50] Val sample 1649
+    eps               eps_mean=0.10254
+    curl_div          eps_mean=0.11888
+    spectral          eps_mean=0.22264
+    okubo_weiss       eps_mean=0.08467
+    wasserstein       eps_mean=0.11087
+    stream_function   eps_mean=0.07462
+    strain_rate       eps_mean=0.09363
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1649.png
+
+[ 44/50] Val sample 1675
+    eps               eps_mean=0.13876
+    curl_div          eps_mean=0.11235
+    spectral          eps_mean=0.21435
+    okubo_weiss       eps_mean=0.10754
+    wasserstein       eps_mean=0.12087
+    stream_function   eps_mean=0.13250
+    strain_rate       eps_mean=0.11865
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1675.png
+
+[ 45/50] Val sample 1731
+    eps               eps_mean=0.14946
+    curl_div          eps_mean=0.12470
+    spectral          eps_mean=0.27316
+    okubo_weiss       eps_mean=0.10103
+    wasserstein       eps_mean=0.13970
+    stream_function   eps_mean=0.12693
+    strain_rate       eps_mean=0.13827
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1731.png
+
+[ 46/50] Val sample 1753
+    eps               eps_mean=0.11670
+    curl_div          eps_mean=0.09948
+    spectral          eps_mean=0.22242
+    okubo_weiss       eps_mean=0.11134
+    wasserstein       eps_mean=0.09775
+    stream_function   eps_mean=0.11438
+    strain_rate       eps_mean=0.10460
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1753.png
+
+[ 47/50] Val sample 1796
+    eps               eps_mean=0.06756
+    curl_div          eps_mean=0.05923
+    spectral          eps_mean=0.11583
+    okubo_weiss       eps_mean=0.04538
+    wasserstein       eps_mean=0.05106
+    stream_function   eps_mean=0.07094
+    strain_rate       eps_mean=0.05936
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1796.png
+
+[ 48/50] Val sample 1880
+    eps               eps_mean=0.14286
+    curl_div          eps_mean=0.11497
+    spectral          eps_mean=0.16909
+    okubo_weiss       eps_mean=0.19668
+    wasserstein       eps_mean=0.12353
+    stream_function   eps_mean=0.15820
+    strain_rate       eps_mean=0.16909
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1880.png
+
+[ 49/50] Val sample 1903
+    eps               eps_mean=0.06122
+    curl_div          eps_mean=0.05628
+    spectral          eps_mean=0.12439
+    okubo_weiss       eps_mean=0.04884
+    wasserstein       eps_mean=0.05563
+    stream_function   eps_mean=0.06036
+    strain_rate       eps_mean=0.06029
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1903.png
+
+[ 50/50] Val sample 1956
+    eps               eps_mean=0.09179
+    curl_div          eps_mean=0.09402
+    spectral          eps_mean=0.22194
+    okubo_weiss       eps_mean=0.08048
+    wasserstein       eps_mean=0.08533
+    stream_function   eps_mean=0.06755
+    strain_rate       eps_mean=0.07621
+    -> /root/ocean_diffusion/Model Parameters/Loss Function/results/eval_visual_loss/sample_1956.png
+
+Report -> /root/ocean_diffusion/Model Parameters/Loss Function/results/loss_eval_visual_summary.txt
+
+Done.

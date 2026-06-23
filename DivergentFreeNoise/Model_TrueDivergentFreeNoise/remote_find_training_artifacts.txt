@@ -1,2 +1,0 @@
-/root/Model_TrueDivergentFreeNoise/Basic DDPM/journal.md
-/root/Model_TrueDivergentFreeNoise/Basic DDPM/checkpoints/training_log.csv

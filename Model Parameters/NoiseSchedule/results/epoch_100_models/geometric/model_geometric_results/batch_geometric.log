@@ -1,0 +1,40 @@
+Device     : cuda
+Schedule   : geometric
+Checkpoint : /root/NoiseSchedule/checkpoints_repaint_geometric/best_model_geometric.pt
+Output dir : /root/NoiseSchedule/model_geometric_results
+Loaded checkpoint (epoch 78), T=1000, schedule=geometric
+
+[Run 1/10]  val sample=0, seed=1
+  Saved: /root/NoiseSchedule/model_geometric_results/result_01.png  (RMSE=0.1841)
+
+[Run 2/10]  val sample=1, seed=8
+  Saved: /root/NoiseSchedule/model_geometric_results/result_02.png  (RMSE=0.1895)
+
+[Run 3/10]  val sample=2, seed=15
+  Saved: /root/NoiseSchedule/model_geometric_results/result_03.png  (RMSE=0.1951)
+
+[Run 4/10]  val sample=3, seed=22
+  Saved: /root/NoiseSchedule/model_geometric_results/result_04.png  (RMSE=0.1564)
+
+[Run 5/10]  val sample=4, seed=29
+  Saved: /root/NoiseSchedule/model_geometric_results/result_05.png  (RMSE=0.1720)
+
+[Run 6/10]  val sample=5, seed=36
+  Saved: /root/NoiseSchedule/model_geometric_results/result_06.png  (RMSE=0.2157)
+
+[Run 7/10]  val sample=6, seed=43
+  Saved: /root/NoiseSchedule/model_geometric_results/result_07.png  (RMSE=0.1106)
+
+[Run 8/10]  val sample=7, seed=50
+  Saved: /root/NoiseSchedule/model_geometric_results/result_08.png  (RMSE=0.0890)
+
+[Run 9/10]  val sample=8, seed=57
+  Saved: /root/NoiseSchedule/model_geometric_results/result_09.png  (RMSE=0.1424)
+
+[Run 10/10]  val sample=9, seed=64
+  Saved: /root/NoiseSchedule/model_geometric_results/result_10.png  (RMSE=0.1800)
+
+All done.
+RMSE per run : ['0.1841', '0.1895', '0.1951', '0.1564', '0.1720', '0.2157', '0.1106', '0.0890', '0.1424', '0.1800']
+Mean RMSE    : 0.1635   Std: 0.0374
+Exit code: 0
