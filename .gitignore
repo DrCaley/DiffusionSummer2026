@@ -1,10 +1,15 @@
-# Datasets — pickle files are too large for GitHub
+# Datasets — pickle / .mat files are too large for GitHub (any depth)
 data.pickle
+Datasets/**/*.pickle
+Datasets/**/*.mat
 Datasets/*.pickle
 Datasets/*.mat
 
-# Generated visualisation images and eddy catalog (re-created by scripts)
+# Generated visualisation images and run outputs (re-created by scripts)
+Datasets/**/*.png
 Datasets/*.png
+Images/
+Conditional DDPM/results/
 DDPM/best_model_results/
 eddies/eddy_catalog.json
 eddies/*.png

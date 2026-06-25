@@ -274,65 +274,341 @@ class DDPM:
 
     def training_loss_streamfn(
         self,
-        model:         torch.nn.Module,
-        x0:            torch.Tensor,
-        land_mask:     torch.Tensor,
-        lambda_angle:  float = 1.0,
-        min_snr_gamma: float = 5.0,
-        cond:          torch.Tensor | None = None,
+        model:           torch.nn.Module,
+        x0:              torch.Tensor,
+        land_mask:       torch.Tensor,
+        lambda_angle:    float = 1.0,
+        min_snr_gamma:   float = 5.0,
+        cond:            torch.Tensor | None = None,
+        parameterization: str = "x0",
+        lambda_mag:      float = 0.0,
+        lambda_vort:     float = 0.0,
     ) -> tuple[torch.Tensor, torch.Tensor, dict]:
         """
-        Calibrated x0-prediction loss for the stream-function model.
+        Calibrated training loss for the stream-function model, supporting both
+        x0-prediction and v-prediction.  In BOTH cases the network output is a
+        divergence-free field (the curl of its scalar stream function); only the
+        *interpretation* of that field and the loss target change.
 
-        The model (StreamFunctionUNet) returns x̂₀ directly as a divergence-free
-        field (the curl of its scalar stream function).  It is supervised with a
-        Min-SNR-γ–weighted reconstruction MSE plus an angle (direction) term:
+        parameterization == "x0"  (original):
+            The network output IS x̂₀.  Supervised with a Min-SNR-γ–weighted
+            reconstruction MSE plus an angle term:
 
-            L = w_t · ‖x̂₀ − x₀‖²_ocean  +  λ · (1 − cosθ)_ocean
+                L = w_t · ‖x̂₀ − x₀‖²_ocean  +  λ · (1 − cosθ)_ocean
 
-        where  w_t = min(SNR_t, γ) / mean(min(SNR_t, γ))  is the Min-SNR-γ weight
-        (Hang et al., 2023).  Clamping the SNR recovers the noise-level balancing
-        that motivates v-prediction while keeping the stream-function (x0-space)
-        parameterisation that guarantees incompressibility.  The angle term keeps
-        flow direction — the eddy-detection north star — first-class.
+            where  w_t = min(SNR_t, γ) / mean(min(SNR_t, γ))  (Hang et al., 2023).
+
+        parameterization == "v"  (exposure-bias fix):
+            The network output is the velocity target  v = √ᾱ·ε − √(1−ᾱ)·x₀,
+            and the clean field is reconstructed as  x̂₀ = √ᾱ·x_t − √(1−ᾱ)·v̂.
+            Because x_t, ε and x₀ are all divergence-free, v and the recovered x̂₀
+            are divergence-free too — incompressibility is preserved exactly.
+            v has ≈unit variance at every timestep (Salimans & Ho, 2022), so the
+            parameterisation removes the high-noise magnitude collapse seen with
+            x0-prediction sampling.  Supervised with a Min-SNR-γ–weighted v-MSE
+            plus the angle term:
+
+                L = w_t · ‖v̂ − v‖²_ocean  +  λ · (1 − cosθ)_ocean
+
+            where, since ‖x₀ − x̂₀‖² = (1−ᾱ)·‖v − v̂‖², the x0-space Min-SNR
+            target maps to  w_t = min(SNR_t, γ)/(SNR_t + 1)  (Hang et al., 2023),
+            normalised to unit mean.  This down-weights the highest-noise steps —
+            which otherwise push the curl of ψ toward full-magnitude high-
+            frequency speckle — while v keeps magnitude balanced.  Pass γ ≤ 0 to
+            recover the plain, fully noise-balanced v-MSE.
 
         Args:
-            model:         StreamFunctionUNet predicting the clean field x̂₀.
-            x0:            (B, 2, H, W) clean fields.
-            land_mask:     (H, W) bool, True = land (excluded from loss).
-            lambda_angle:  weight λ on the directional (1−cosθ) term.
-            min_snr_gamma: Min-SNR clamp γ (paper default 5.0).
-            cond:          (B, C, H, W) optional conditioning channels passed to
-                           the model (for the conditional stream-function variant).
-                           None for the unconditional model.
+            model:            StreamFunctionUNet (outputs a divergence-free field).
+            x0:               (B, 2, H, W) clean fields.
+            land_mask:        (H, W) bool, True = land (excluded from loss).
+            lambda_angle:     weight λ on the directional (1−cosθ) term.
+            min_snr_gamma:    Min-SNR clamp γ.  For x0: w = min(SNR,γ).  For v:
+                              w = min(SNR,γ)/(SNR+1).  γ ≤ 0 disables weighting
+                              (plain MSE; v only).
+            cond:             (B, C, H, W) optional conditioning channels.
+            parameterization: "x0" or "v".
+            lambda_mag:       weight on an energy-matching term that fights the
+                              MSE mean-seeking which shrinks the field's overall
+                              magnitude.  Per-sample, scale-invariant:
+                                  L_mag = mean[(rms(x̂₀)/rms(x₀) − 1)²]
+                              over ocean cells (both components).  0 disables it
+                              (default, exact original behaviour).  Applies to
+                              both parameterizations via the reconstructed x̂₀.
+            lambda_vort:      weight on a vorticity-matching term that fights the
+                              MSE blur with the physically natural scalar for
+                              incompressible flow:
+                                  L_vort = mean[(ω(x̂₀) − ω(x₀))²]
+                              where ω = ∂v/∂x − ∂u/∂y (central differences, the
+                              SAME kernels as the model curl / divfree_projection).
+                              A blurred / mean-collapsed field has weak vorticity,
+                              so this directly penalises the collapse as a high-
+                              frequency / structure loss.  0 disables it (default).
 
         Returns:
             (total, recon_mse, indiv)
             total:     scalar loss used for backprop
-            recon_mse: unweighted masked reconstruction MSE (for logging)
-            indiv:     {"angle": value}
+            recon_mse: unweighted masked x0-space reconstruction MSE (for logging,
+                       comparable across both parameterizations)
+            indiv:     {"angle": value, "mag": value, "vort": value}
         """
+        if parameterization not in ("x0", "v"):
+            raise ValueError(
+                f"parameterization must be 'x0' or 'v', got {parameterization!r}")
+
         B = x0.shape[0]
         t = torch.randint(0, self.T, (B,), device=self.device)
-        xt, _ = self.q_sample(x0, t)
-        x0_pred = model(xt, t) if cond is None else model(xt, t, cond)   # div-free x̂₀
+        xt, noise = self.q_sample(x0, t)
+        out = model(xt, t) if cond is None else model(xt, t, cond)   # div-free field
 
         ocean = (~land_mask).float()[None, None]     # (1, 1, H, W)
         denom = (ocean.sum() * B).clamp(min=1.0)
 
-        # Min-SNR-γ timestep weight (per sample)
-        ab  = self.alpha_bar[t]
-        snr = ab / (1.0 - ab).clamp(min=1e-8)
-        w   = snr.clamp(max=min_snr_gamma)
-        w   = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+        ab       = self.alpha_bar[t][:, None, None, None]
+        sqrt_ab  = ab.sqrt()
+        sqrt_mab = (1.0 - ab).sqrt()
 
-        se        = ((x0_pred - x0) * ocean) ** 2     # (B, 2, H, W)
-        recon_mse = se.sum() / denom                  # unweighted (logging)
-        weighted  = (w * se).sum() / denom            # Min-SNR weighted (backprop)
+        if parameterization == "v":
+            # v-prediction: network output is v̂; reconstruct x̂₀ for angle/logging.
+            v_target = sqrt_ab * noise - sqrt_mab * x0
+            x0_pred  = sqrt_ab * xt - sqrt_mab * out
+            se_v     = ((out - v_target) * ocean) ** 2
+            if min_snr_gamma > 0:
+                # Min-SNR-γ in v-space.  Since ‖x₀−x̂₀‖² = (1−ᾱ)·‖v−v̂‖², the
+                # x0-space target weight min(SNR,γ) maps to a v-MSE weight of
+                #   w = min(SNR,γ)·(1−ᾱ) = min(SNR,γ) / (SNR+1)
+                # (Hang et al., 2023).  This down-weights the high-noise steps
+                # that otherwise drive full-magnitude high-frequency speckle,
+                # while v-prediction keeps magnitude balanced at all levels.
+                snr  = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+                w    = snr.clamp(max=min_snr_gamma) / (snr + 1.0)
+                w    = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+                main = (w * se_v).sum() / denom
+            else:
+                # Plain, fully noise-balanced v-MSE (γ ≤ 0 escape hatch).
+                main = se_v.sum() / denom
+        else:
+            # x0-prediction with Min-SNR-γ reweighting (original behaviour).
+            x0_pred  = out
+            snr      = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+            w        = snr.clamp(max=min_snr_gamma)
+            w        = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+            se       = ((x0_pred - x0) * ocean) ** 2
+            main     = (w * se).sum() / denom
 
-        ang   = _lf_mod.angle_loss(x0_pred, x0, ocean)
-        total = weighted + lambda_angle * ang
-        return total, recon_mse, {"angle": ang}
+        recon_mse = (((x0_pred - x0) * ocean) ** 2).sum() / denom   # unweighted log
+        ang       = _lf_mod.angle_loss(x0_pred, x0, ocean)
+        total     = main + lambda_angle * ang
+        indiv     = {"angle": ang}
+
+        if lambda_mag > 0:
+            # Energy (RMS) matching, per-sample and scale-invariant.  The MSE
+            # term is mean-seeking under directional uncertainty, which shrinks
+            # the field's overall magnitude (measured: ~87% even at low noise).
+            # Penalising the ratio of predicted-to-true RMS restores full energy
+            # WITHOUT pinning per-cell directions (it only matches total power).
+            n_ocean  = ocean.sum().clamp(min=1.0)
+            pred_rms = (((x0_pred ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            true_rms = (((x0      ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            mag      = ((pred_rms / true_rms.clamp(min=1e-6) - 1.0) ** 2).mean()
+            total    = total + lambda_mag * mag
+            indiv["mag"] = mag
+
+        if lambda_vort > 0:
+            # Vorticity (curl) matching.  ω = ∂v/∂x − ∂u/∂y is the physically
+            # natural scalar for incompressible flow (the field is fully
+            # described by it given div-free).  A blurred / mean-collapsed field
+            # has weak vorticity, so matching ω is a high-frequency structure
+            # loss that directly fights MSE blur — the principled version of the
+            # "curl-div" idea (the div half is redundant here: curl(ψ) is already
+            # div-free).  Uses the SAME central-difference kernels as the model.
+            vort = (((self._vorticity(x0_pred) - self._vorticity(x0)) * ocean)
+                    ** 2).sum() / denom
+            total = total + lambda_vort * vort
+            indiv["vort"] = vort
+
+        return total, recon_mse, indiv
+
+    # ------------------------------------------------------------------
+    # Energy-score (CRPS) calibration loss
+    # ------------------------------------------------------------------
+
+    def training_loss_streamfn_energy(
+        self,
+        model:           torch.nn.Module,
+        x0:              torch.Tensor,
+        land_mask:       torch.Tensor,
+        lambda_angle:    float = 1.0,
+        min_snr_gamma:   float = 5.0,
+        cond:            torch.Tensor | None = None,
+        parameterization: str = "x0",
+        lambda_mag:      float = 0.0,
+        lambda_vort:     float = 0.0,
+        lambda_energy:   float = 1.0,
+        energy_samples:  int = 4,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        Calibration-aware training loss: the standard fidelity terms (Min-SNR-γ
+        reconstruction + angle + optional magnitude / vorticity) PLUS a strictly
+        proper ENERGY SCORE that supervises the ensemble *spread* — the quantity
+        every other loss ignores and the one the uncertainty-calibration metric
+        (directional-spread correlation r_dir) actually measures.
+
+        Why this exists
+        ---------------
+        Reconstruction, magnitude and vorticity losses all score a SINGLE sample's
+        fidelity, so the model's predictive uncertainty is only an unsupervised
+        by-product.  Measured calibration is therefore good on some frames and
+        broken on others (r_dir ranges ~−0.04 … +0.79).  The energy score is the
+        minimal proper scoring rule that fixes this: for the SAME conditioning it
+        draws K predictions at one shared noise level and rewards the ensemble for
+        being correctly DISPERSED, not just individually accurate.
+
+        Energy score (Gneiting & Raftery, 2007), per example, β = 1:
+
+            ES = (1/K) Σ_k ‖x̂_k − x₀‖  −  (1 / 2K(K−1)) Σ_{k≠j} ‖x̂_k − x̂_j‖
+
+        The first term rewards accuracy; the SECOND (subtracted) term rewards
+        spread, so minimising ES penalises BOTH over- and under-dispersion.  It is
+        strictly proper, so its unique minimiser is the true predictive
+        distribution.  Norms are RMS over ocean cells (both components), matching
+        the magnitude term's normalisation so the loss scales are comparable.
+
+        Mechanics
+        ---------
+        The K predictions come from K INDEPENDENT forward-noise draws of the same
+        x₀ at the SAME timestep t (tiled into one batched forward pass of size
+        K·B).  Their disagreement is the model's conditional uncertainty at noise
+        level t — a one-step proxy for the full-trajectory ensemble spread used at
+        inference.  All fidelity terms are averaged over the K·B tiled samples
+        (same expectation as the single-sample loss, just lower variance).
+
+        NOTE memory/compute: one forward pass is K× larger.  Reduce --batch so
+        K·batch ≈ the single-sample batch you would otherwise use.
+
+        Args (additional to training_loss_streamfn):
+            lambda_energy:  weight on the energy-score term.  0 recovers the plain
+                            tiled fidelity loss (no calibration supervision).
+            energy_samples: K, the number of predictive samples per example used
+                            to estimate the score.  K ≥ 2 required; larger K gives
+                            a lower-variance spread estimate at linear cost.
+
+        Returns:
+            (total, recon_mse, indiv) with indiv adding
+              "energy"  the energy score (lower = better calibrated)
+              "spread"  mean pairwise ensemble RMS distance (diagnostic)
+              "acc"     mean prediction-to-truth RMS distance (diagnostic)
+        """
+        if parameterization not in ("x0", "v"):
+            raise ValueError(
+                f"parameterization must be 'x0' or 'v', got {parameterization!r}")
+        K = int(energy_samples)
+        if K < 2:
+            raise ValueError(f"energy_samples must be >= 2, got {K}")
+
+        B = x0.shape[0]
+        t = torch.randint(0, self.T, (B,), device=self.device)
+
+        # Tile to K independent forward-noise copies that SHARE t within each group.
+        t_K    = t.repeat(K)                                   # (K*B,)
+        x0_K   = x0.repeat(K, 1, 1, 1)                         # (K*B, 2, H, W)
+        cond_K = cond.repeat(K, 1, 1, 1) if cond is not None else None
+        xt_K, noise_K = self.q_sample(x0_K, t_K)
+        out = model(xt_K, t_K) if cond_K is None else model(xt_K, t_K, cond_K)
+
+        ocean = (~land_mask).float()[None, None]              # (1, 1, H, W)
+        n_ocean = ocean.sum().clamp(min=1.0)
+        denom = (ocean.sum() * (K * B)).clamp(min=1.0)
+
+        ab       = self.alpha_bar[t_K][:, None, None, None]
+        sqrt_ab  = ab.sqrt()
+        sqrt_mab = (1.0 - ab).sqrt()
+
+        if parameterization == "v":
+            v_target = sqrt_ab * noise_K - sqrt_mab * x0_K
+            x0_pred  = sqrt_ab * xt_K - sqrt_mab * out
+            se_v     = ((out - v_target) * ocean) ** 2
+            if min_snr_gamma > 0:
+                snr  = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+                w    = snr.clamp(max=min_snr_gamma) / (snr + 1.0)
+                w    = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+                main = (w * se_v).sum() / denom
+            else:
+                main = se_v.sum() / denom
+        else:
+            x0_pred  = out
+            snr      = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+            w        = snr.clamp(max=min_snr_gamma)
+            w        = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+            se       = ((x0_pred - x0_K) * ocean) ** 2
+            main     = (w * se).sum() / denom
+
+        recon_mse = (((x0_pred - x0_K) * ocean) ** 2).sum() / denom
+        ang       = _lf_mod.angle_loss(x0_pred, x0_K, ocean)
+        total     = main + lambda_angle * ang
+        indiv     = {"angle": ang}
+
+        if lambda_mag > 0:
+            pred_rms = (((x0_pred ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            true_rms = (((x0_K     ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            mag      = ((pred_rms / true_rms.clamp(min=1e-6) - 1.0) ** 2).mean()
+            total    = total + lambda_mag * mag
+            indiv["mag"] = mag
+
+        if lambda_vort > 0:
+            vort = (((self._vorticity(x0_pred) - self._vorticity(x0_K)) * ocean)
+                    ** 2).sum() / denom
+            total = total + lambda_vort * vort
+            indiv["vort"] = vort
+
+        # ---- Energy score over the K predictions per example ----
+        eps  = 1e-12
+        H, W = x0.shape[-2:]
+        xhat = x0_pred.view(K, B, 2, H, W)                    # (K, B, 2, H, W)
+        x0_b = x0[None]                                       # (1, B, 2, H, W)
+
+        # Accuracy term: RMS prediction-to-truth distance per (k, b).
+        d_truth = ((((xhat - x0_b) ** 2) * ocean).sum(dim=(2, 3, 4))
+                   / (2.0 * n_ocean) + eps).sqrt()            # (K, B)
+        term1 = d_truth.mean(dim=0)                           # (B,)
+
+        # Spread term: pairwise RMS distance, unbiased over off-diagonal pairs.
+        d_pair = ((((xhat[:, None] - xhat[None, :]) ** 2) * ocean).sum(dim=(3, 4, 5))
+                  / (2.0 * n_ocean) + eps).sqrt()             # (K, K, B)
+        pair_sum = d_pair.sum(dim=(0, 1)) - d_pair.diagonal(dim1=0, dim2=1).sum(dim=-1)
+        term2 = pair_sum / (K * (K - 1))                      # (B,)
+
+        energy = (term1 - 0.5 * term2).mean()
+        total  = total + lambda_energy * energy
+        indiv["energy"] = energy
+        indiv["spread"] = term2.mean()
+        indiv["acc"]    = term1.mean()
+
+        return total, recon_mse, indiv
+
+    # ------------------------------------------------------------------
+    # Vorticity operator (shared by the vorticity-matching loss)
+    # ------------------------------------------------------------------
+
+    def _vorticity(self, field: torch.Tensor) -> torch.Tensor:
+        """Central-difference vorticity ω = ∂v/∂x − ∂u/∂y → (B, 1, H, W).
+
+        Uses the SAME kernels as model.StreamFunctionUNet's curl and
+        divfree_projection (∂/∂x = ∂/∂H, ∂/∂y = ∂/∂W), so the loss measures
+        vorticity under exactly the operator the rest of the pipeline uses.
+        """
+        u = field[:, 0:1]
+        v = field[:, 1:2]
+        kH = torch.tensor([[[[0., -1., 0.], [0., 0., 0.], [0., 1., 0.]]]],
+                          device=field.device, dtype=field.dtype) / 2.0  # ∂/∂x
+        kW = torch.tensor([[[[0., 0., 0.], [-1., 0., 1.], [0., 0., 0.]]]],
+                          device=field.device, dtype=field.dtype) / 2.0  # ∂/∂y
+        dv_dx = F.conv2d(v, kH, padding=1)
+        du_dy = F.conv2d(u, kW, padding=1)
+        return dv_dx - du_dy
 
 
     # ------------------------------------------------------------------
@@ -483,4 +759,79 @@ class EpsFromStreamFn(torch.nn.Module):
         sqrt_ab  = ab.sqrt()
         sqrt_mab = (1.0 - ab).sqrt().clamp(min=1e-8)
         return (xt - sqrt_ab * x0) / sqrt_mab
+
+
+# ---------------------------------------------------------------------------
+# Inference adapter: stream-function (v-prediction) model → epsilon-equivalent
+# ---------------------------------------------------------------------------
+
+class EpsFromV(torch.nn.Module):
+    """
+    Wrap a stream-function model trained with **v-prediction** so it exposes an
+    *epsilon-equivalent* output, letting it drop into any sampler that expects an
+    eps-predicting network (``p_sample_step``, RePaint, DPS) with no other change.
+
+        v̂(x_t, t) = stream_model(x_t, t)                 (divergence-free field)
+        x̂₀        = √ᾱ_t · x_t − √(1−ᾱ_t) · v̂
+        ε̂         = √(1−ᾱ_t) · x_t + √ᾱ_t · v̂
+
+    Feeding ε̂ into the standard reverse step recovers exactly
+    x̂₀ = √ᾱ·x_t − √(1−ᾱ)·v̂, which is divergence-free (a linear combination of
+    the divergence-free x_t and v̂), so incompressibility is preserved end to end.
+    """
+
+    def __init__(self, stream_model: torch.nn.Module, diffusion: "DDPM",
+                 cond: torch.Tensor | None = None):
+        super().__init__()
+        self.stream_model = stream_model
+        self._ab = diffusion.alpha_bar
+        self.cond = cond
+
+    def forward(self, xt: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        if self.cond is None:
+            v = self.stream_model(xt, t)
+        else:
+            cond = self.cond
+            if cond.shape[0] != xt.shape[0]:           # broadcast to batch
+                cond = cond.expand(xt.shape[0], *cond.shape[1:])
+            v = self.stream_model(xt, t, cond)
+        ab = self._ab[t][:, None, None, None]
+        sqrt_ab  = ab.sqrt()
+        sqrt_mab = (1.0 - ab).sqrt()
+        return sqrt_mab * xt + sqrt_ab * v
+
+
+# ---------------------------------------------------------------------------
+# Parameterization helpers shared by all inference code
+# ---------------------------------------------------------------------------
+
+def is_v_pred(pred_type: str | None) -> bool:
+    """True if a checkpoint's pred_type denotes v-prediction."""
+    return str(pred_type).startswith("v")
+
+
+def eps_wrapper_for(stream_model: torch.nn.Module, diffusion: "DDPM",
+                    pred_type: str | None,
+                    cond: torch.Tensor | None = None) -> torch.nn.Module:
+    """Return the correct eps-equivalent wrapper for a checkpoint's pred_type.
+
+    ``v*``  → :class:`EpsFromV`  ;  anything else → :class:`EpsFromStreamFn`.
+    Both wrap the same StreamFunctionUNet and are drop-in for ``p_sample_step``.
+    """
+    if is_v_pred(pred_type):
+        return EpsFromV(stream_model, diffusion, cond=cond)
+    return EpsFromStreamFn(stream_model, diffusion, cond=cond)
+
+
+def x0_from_output(diffusion: "DDPM", xt: torch.Tensor, model_out: torch.Tensor,
+                   t: torch.Tensor, pred_type: str | None) -> torch.Tensor:
+    """Convert a raw model output to x̂₀ given the parameterization.
+
+    For x0-prediction the output IS x̂₀.  For v-prediction
+    x̂₀ = √ᾱ·x_t − √(1−ᾱ)·v̂.  ``t`` is a (B,) long tensor.
+    """
+    if not is_v_pred(pred_type):
+        return model_out
+    ab = diffusion.alpha_bar[t][:, None, None, None]
+    return ab.sqrt() * xt - (1.0 - ab).sqrt() * model_out
 

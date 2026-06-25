@@ -16,7 +16,8 @@ reverse loop.  Diffusion non-determinism then yields a DIVERSE ENSEMBLE of
 plausible fields from the SAME fixed constraints — the project north star.
 
 For each requested validation sample this produces (in the established visual
-style — quiver panels coloured by speed, land in black):
+style — quiver panels coloured by speed, land in black; fields drawn in PHYSICAL
+units, exactly matching the GP / unconditional-DDPM displays):
 
   (A) a static summary PNG — 2x3 panels:
         1. Ground truth
@@ -29,15 +30,16 @@ style — quiver panels coloured by speed, land in black):
   (B) a denoising GIF — 1x2 panels animated over the reverse process:
         [ noisy field x_t | model x_hat_0 ]   (so you watch the field emerge)
 
-  (C) an ensemble-diversity PNG — the N individual draws side by side, showing
-      how the guesses agree where informed and diverge where unconstrained.
+  (C) a ground-truth-vs-draws PNG — the ground truth centred on the top row,
+      then N individual posterior draws below it (4 rows of 3), showing how the
+      guesses agree where informed and diverge where unconstrained.
 
 Usage (from workspace root, after a checkpoint exists):
     python "Conditional DDPM/testing/infer_cond.py" \
         --checkpoint "Conditional DDPM/checkpoints_cond/best_streamfncond_minsnr5_ang1_lags13-25_div_free_cosine.pt" \
         --pickle     Datasets/data_divfree_chrono.pickle \
-        --n_samples  4 --random --seed 1234 \
-        --n_ensemble 6 --inference_steps 100 \
+        --n_samples  4 \
+        --n_ensemble 12 --inference_steps 100 \
         --out_dir    "Conditional DDPM/results/cond_streamfn"
 """
 
@@ -65,7 +67,7 @@ for _p in [_root, os.path.join(_root, "utils"), _model, os.path.join(_root, "DDP
     if os.path.isdir(_p):
         sys.path.insert(0, _p)
 
-from diffusion    import DDPM, EpsFromStreamFn
+from diffusion    import DDPM, eps_wrapper_for, x0_from_output
 from model        import StreamFunctionUNet
 from cond_dataset import (
     ConditionalOceanDataset,
@@ -230,17 +232,20 @@ def sample_capture(stream_model, diffusion, cond, land_np, args, device, seed):
     """
     Draw one conditional posterior sample, capturing (t, x_t, x_hat_0) frames.
 
-    The conditioning is baked into an EpsFromStreamFn adapter so the standard
-    `p_sample_step` reverse loop runs unchanged.  x_hat_0 is read directly from
-    the (x0-prediction) stream model — it is divergence-free by construction.
+    The conditioning is baked into the correct eps-equivalent adapter for the
+    checkpoint's parameterization (EpsFromStreamFn for x0, EpsFromV for v) so the
+    standard `p_sample_step` reverse loop runs unchanged.  x_hat_0 is recovered
+    via `x0_from_output` and is divergence-free by construction.
 
     Returns (final_pred_np (2,H,W), frames list of (t_int, xt_np, x0hat_np)).
     """
     H, W = land_np.shape
     ocean_f = torch.from_numpy(~land_np).float().to(device)[None, None]
     cond_b  = cond.unsqueeze(0).to(device)                       # (1, C, H, W)
+    pred_type = getattr(args, "pred_type", "x0_streamfn_cond")
 
-    eps_model = EpsFromStreamFn(stream_model, diffusion, cond=cond_b).to(device)
+    eps_model = eps_wrapper_for(stream_model, diffusion, pred_type,
+                                cond=cond_b).to(device)
 
     torch.manual_seed(seed)
     xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device))
@@ -251,10 +256,10 @@ def sample_capture(stream_model, diffusion, cond, land_np, args, device, seed):
 
     def x0hat_np(xt_, t_):
         t_t = torch.full((1,), max(t_, 0), device=device, dtype=torch.long)
-        x0  = stream_model(xt_, t_t, cond_b)
+        out = stream_model(xt_, t_t, cond_b)
+        x0  = x0_from_output(diffusion, xt_, out, t_t, pred_type)
         return (x0 * ocean_f).squeeze(0).cpu().numpy()
 
-    n = len(schedule)
     for step_i, (t_int, t_prev_int) in enumerate(schedule):
         xt = diffusion.p_sample_step(eps_model, xt, t_int, t_prev_int) * ocean_f
         if step_i == 0 or t_prev_int < 0 or step_i % max(1, args.capture_every) == 0:
@@ -285,22 +290,21 @@ def ensemble_infer(stream_model, diffusion, cond, land_np, args, device, base_se
 # ===========================================================================
 
 def render_summary(out_path, idx, seed, true_np, prior_np, mean_np, member0_np,
-                   spread, path_mask, land_np, vmax, cov_pct, stats_txt):
-    """2x3 static summary panel."""
-    ocean_np = ~land_np
+                   spread, path_mask, land_np, cov_pct, stats_txt):
+    """2x3 static summary panel (fields in physical units, per-panel colour scale)."""
     land_d = land_np.T
     fig, axes = plt.subplots(2, 3, figsize=(20, 11), dpi=90)
     ax = axes.flatten()
 
-    plot_field(ax[0], true_np[0].T, true_np[1].T, land_d, "Ground truth", vmax=vmax)
+    plot_field(ax[0], true_np[0].T, true_np[1].T, land_d, "Ground truth")
     plot_path(ax[1], path_mask.T, land_d,
               f"Robot observations  ({path_mask.sum()} cells, {cov_pct:.1f}%)")
     plot_field(ax[2], prior_np[0].T, prior_np[1].T, land_d,
-               "Temporal prior  (prev 13 h)", vmax=vmax)
+               "Temporal prior  (prev 13 h)")
     plot_field(ax[3], mean_np[0].T, mean_np[1].T, land_d,
-               "Conditional prediction  (ensemble mean)", vmax=vmax)
+               "Conditional prediction  (ensemble mean)")
     plot_field(ax[4], member0_np[0].T, member0_np[1].T, land_d,
-               "One plausible draw  (member 0)", vmax=vmax)
+               "One plausible draw  (member 0)")
 
     sp = spread.T.copy()
     im = ax[5].imshow(sp, origin="lower", cmap="magma", vmin=0.0, vmax=1.0,
@@ -323,21 +327,41 @@ def render_summary(out_path, idx, seed, true_np, prior_np, mean_np, member0_np,
     plt.close(fig)
 
 
-def render_ensemble(out_path, idx, members, land_np, vmax):
-    """Grid of the individual ensemble draws."""
+def render_draws_with_truth(out_path, idx, true_np, members, land_np,
+                            cov_pct=None):
+    """Ground truth (centred, top row) above the N individual posterior draws.
+
+    Layout: the top row shows the ground truth centred in the middle; the four
+    rows below show up to 12 diverse draws (3 per row).  Every panel uses the
+    established per-panel colour scale and physical units — identical in format
+    to the GP / unconditional-DDPM field displays.
+    """
     land_d = land_np.T
     n = len(members)
-    cols = min(n, 3)
-    rows = (n + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(6.5 * cols, 4.0 * rows), dpi=90)
-    axes = np.atleast_1d(axes).flatten()
-    for k, m in enumerate(members):
-        plot_field(axes[k], m[0].T, m[1].T, land_d, f"Draw {k}", vmax=vmax)
-    for k in range(n, len(axes)):
-        axes[k].axis("off")
-    plt.suptitle(f"Conditional ensemble — {n} diverse draws — val sample {idx}",
-                 fontsize=13)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    n_draw = min(n, 12)
+    fig, axes = plt.subplots(5, 3, figsize=(5.4 * 3, 3.9 * 5), dpi=90)
+
+    # Top row: ground truth centred (flanking cells blank).
+    axes[0, 0].axis("off")
+    axes[0, 2].axis("off")
+    plot_field(axes[0, 1], true_np[0].T, true_np[1].T, land_d, "GROUND TRUTH")
+    for sp in axes[0, 1].spines.values():       # highlight the truth panel
+        sp.set_edgecolor("tab:green"); sp.set_linewidth(3)
+
+    # Rows 1-4: the diverse draws, 3 per row.
+    for k in range(12):
+        ax = axes[1 + k // 3, k % 3]
+        if k < n_draw:
+            plot_field(ax, members[k][0].T, members[k][1].T, land_d, f"Draw {k}")
+        else:
+            ax.axis("off")
+
+    cov_txt = f"   (robot coverage {cov_pct:.1f}%)" if cov_pct is not None else ""
+    plt.suptitle(
+        f"Ground truth vs {n_draw} plausible draws — val sample {idx}{cov_txt}\n"
+        "same fixed observations + priors;  diversity = diffusion non-determinism",
+        fontsize=13)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -348,7 +372,6 @@ def render_gif(out_path, idx, frames, true_np, land_np, fps):
     land_d = land_np.T
     ut, vt, _ = unit_normalize(true_np, ocean_np)
     pil_frames = []
-    T = 1000
     for (t_int, xt_np, x0_np) in frames:
         fig, axes = plt.subplots(1, 2, figsize=(15, 6), dpi=80)
         uxt, vxt, _ = unit_normalize(xt_np, ocean_np)
@@ -385,10 +408,15 @@ def parse_args():
     p.add_argument("--pickle", default="Datasets/data_divfree_chrono.pickle")
     p.add_argument("--split", type=int, default=1, help="0=train,1=val,2=test")
     p.add_argument("--n_samples", type=int, default=4)
-    p.add_argument("--random", action="store_true",
-                   help="Pick random sample indices (else 0..n_samples-1).")
-    p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--n_ensemble", type=int, default=6,
+    p.add_argument("--ordered", action="store_true",
+                   help="Use the first n_samples in index order instead of "
+                        "random samples (random is the default).")
+    p.add_argument("--random", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--seed", type=int, default=None,
+                   help="RNG seed for sample selection, robot paths, and draws. "
+                        "Default: a fresh random seed each run (printed for "
+                        "reproducibility).")
+    p.add_argument("--n_ensemble", type=int, default=12,
                    help="Number of diverse posterior draws per sample.")
     p.add_argument("--inference_steps", type=int, default=100)
     p.add_argument("--capture_every", type=int, default=5,
@@ -405,19 +433,35 @@ def parse_args():
 # Main
 # ===========================================================================
 
+def select_device():
+    """Pick the fastest available backend: CUDA > Apple MPS > CPU.
+
+    The divergence-free noise sampler already runs its FFT on CPU and moves the
+    result to the target device, so MPS (which lacks complex-FFT support) is safe.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def main():
     args   = parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = select_device()
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"Device     : {device}")
     print(f"Checkpoint : {args.checkpoint}")
 
     # ---- Checkpoint ----
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    if ckpt.get("pred_type") != "x0_streamfn_cond":
+    pred_type = ckpt.get("pred_type")
+    if pred_type not in ("x0_streamfn_cond", "v_streamfn_cond"):
         raise ValueError(
-            f"Expected pred_type 'x0_streamfn_cond', got {ckpt.get('pred_type')!r}. "
-            "Use direction_magnitude_display.py for unconditional models.")
+            f"Expected pred_type 'x0_streamfn_cond' or 'v_streamfn_cond', got "
+            f"{pred_type!r}.  Use direction_magnitude_display.py for "
+            "unconditional models.")
+    args.pred_type = pred_type
     ca        = ckpt.get("args", {})
     base_ch   = ca.get("base_ch", 64)
     time_dim  = ca.get("time_dim", 256)
@@ -430,7 +474,7 @@ def main():
     data_std  = ckpt.get("data_std", None)
     spectral_filter = ckpt.get("spectral_filter", None)
     print(f"Model      : epoch {ckpt.get('epoch','?')}  val={ckpt.get('val_loss', float('nan')):.5f}  "
-          f"lags={lags}  cond_ch={cond_ch}  noise={noise_type}")
+          f"lags={lags}  cond_ch={cond_ch}  noise={noise_type}  pred={pred_type}")
 
     # ---- Data (same normalization the model trained with) ----
     ds = ConditionalOceanDataset(
@@ -451,15 +495,25 @@ def main():
     diffusion = DDPM(T=T, beta_schedule=schedule, device=device,
                      noise_type=noise_type, spectral_filter=spectral_filter)
 
-    # ---- Sample indices ----
-    rng = np.random.default_rng(args.seed)
-    if args.random:
-        indices = rng.integers(0, len(ds), size=args.n_samples).tolist()
-    else:
+    # ---- Sample indices (random samples + fresh random seed by default) ----
+    run_seed = (args.seed if args.seed is not None
+                else int(np.random.SeedSequence().entropy & 0x7FFFFFFF))
+    print(f"Seed       : {run_seed}" + ("  (random)" if args.seed is None else ""))
+    rng = np.random.default_rng(run_seed)
+    if args.ordered:
         indices = list(range(min(args.n_samples, len(ds))))
+    else:
+        indices = rng.integers(0, len(ds), size=args.n_samples).tolist()
+
+    # Physical-unit rescale: the model trained on std-normalized fields, so undo
+    # the std to plot in the same physical units as the GP / unconditional
+    # displays (otherwise arrows look ~1/std times too large).
+    phys_scale = float(data_std) if data_std else 1.0
 
     for s_i, idx in enumerate(indices):
-        seed = args.seed + idx
+        # Per-sample seed = idx so a given sample's robot path + posterior draws
+        # are reproducible; the run-level seed only randomizes WHICH samples we view.
+        seed = idx
         b = build_cond(ds, idx, args.path_steps, seed)
         true_np  = b["target"].cpu().numpy()
         prior_np = b["priors"][:2].cpu().numpy()                 # prev-13 (u,v)
@@ -470,7 +524,7 @@ def main():
               f"({cov_pct:.1f}%)  drawing {args.n_ensemble} members ...")
 
         mean_np, frames0, members = ensemble_infer(
-            stream_model, diffusion, b["cond"], land_np, args, device, base_seed=idx)
+            stream_model, diffusion, b["cond"], land_np, args, device, base_seed=seed)
 
         # ---- Metrics (ensemble mean + member 0), stratified by distance ----
         dist = distance_to_path(path_mask, ocean_np)
@@ -487,21 +541,22 @@ def main():
         stats_txt = (f"RMSE(mean)={rmse_mean:.4f}   angle(all)={np.mean(ev):.1f}deg   "
                      f"unobserved={np.mean(uo):.1f}deg   coverage={cov_pct:.1f}%")
 
-        # ---- Common colour scale from ground truth ----
-        spd = np.sqrt(true_np[0] ** 2 + true_np[1] ** 2)
-        spd[land_np] = np.nan
-        vmax = float(np.nanpercentile(spd, 98)) or 1.0
-
         spread = directional_spread(members, ocean_np)
+
+        # ---- Physical-unit fields for plotting (match the canonical displays) ----
+        true_d    = true_np * phys_scale
+        prior_d   = prior_np * phys_scale
+        mean_d    = mean_np * phys_scale
+        members_d = [m * phys_scale for m in members]
 
         base = f"sample{idx:04d}"
         render_summary(
             os.path.join(args.out_dir, f"{base}_summary.png"),
-            idx, seed, true_np, prior_np, mean_np, members[0],
-            spread, path_mask, land_np, vmax, cov_pct, stats_txt)
-        render_ensemble(
-            os.path.join(args.out_dir, f"{base}_ensemble.png"),
-            idx, members, land_np, vmax)
+            idx, seed, true_d, prior_d, mean_d, members_d[0],
+            spread, path_mask, land_np, cov_pct, stats_txt)
+        render_draws_with_truth(
+            os.path.join(args.out_dir, f"{base}_truth_vs_draws.png"),
+            idx, true_d, members_d, land_np, cov_pct)
         if not args.no_gif:
             render_gif(
                 os.path.join(args.out_dir, f"{base}_denoise.gif"),
