@@ -52,11 +52,25 @@ def pcorr(a, b, eps=1e-12):
 
 
 def vector_std_map(members, ocean_np):
-    """Per-cell vector spread sqrt(mean_k ||m_k - mean||^2)  -> (H, W), NaN land."""
+    """Per-cell vector spread sqrt(mean_k ||m_k - mean||^2)  -> (H, W), NaN land.
+
+    Combined magnitude+angle uncertainty (full 2-vector dispersion)."""
     arr = np.stack(members, axis=0)                  # (K, 2, H, W)
     mean = arr.mean(axis=0, keepdims=True)
     dev2 = ((arr - mean) ** 2).sum(axis=1)           # (K, H, W)
     out = np.sqrt(dev2.mean(axis=0)).astype(np.float32)
+    out[~ocean_np] = np.nan
+    return out
+
+
+def magnitude_std_map(members, ocean_np):
+    """Per-cell SPEED spread std_k(||m_k||)  -> (H, W), NaN land.
+
+    Magnitude-only uncertainty: how much the member speeds disagree, ignoring
+    direction."""
+    arr = np.stack(members, axis=0)                  # (K, 2, H, W)
+    spd = np.sqrt((arr ** 2).sum(axis=1))            # (K, H, W)
+    out = spd.std(axis=0).astype(np.float32)
     out[~ocean_np] = np.nan
     return out
 
@@ -185,10 +199,14 @@ def main():
 
         emp_dir = IC.directional_spread(empirical, ocean_np)
         mod_dir = IC.directional_spread(members, ocean_np)
+        emp_mag = magnitude_std_map(empirical, ocean_np)
+        mod_mag = magnitude_std_map(members, ocean_np)
         emp_std = vector_std_map(empirical, ocean_np)
         mod_std = vector_std_map(members, ocean_np)
-        valid = ocean_np & np.isfinite(emp_dir) & np.isfinite(mod_dir)
+        valid = (ocean_np & np.isfinite(emp_dir) & np.isfinite(mod_dir)
+                 & np.isfinite(emp_mag) & np.isfinite(mod_mag))
         r_dir = pcorr(emp_dir[valid], mod_dir[valid])
+        r_mag = pcorr(emp_mag[valid], mod_mag[valid])
         r_std = pcorr(emp_std[valid], mod_std[valid])
 
         errs = [float(np.nanmean(IC.angle_error_deg(m, src, ocean_np)[ocean_np]))
@@ -198,57 +216,70 @@ def main():
         best_k = int(np.argmin(errs))
 
         if not make_fig:
-            return src_f, cov, r_dir, r_std, errs[best_k]
+            return src_f, cov, r_dir, r_mag, r_std, errs[best_k]
 
-        # ---- render (single-frame mode) ----
+        # ---- render (single-frame mode): 3x3 -- one column per modality ----
         land_d = land_np.T
-        fig, ax = plt.subplots(2, 3, figsize=(20, 11), dpi=95)
-        a = ax.flatten()
-        IC.plot_field(a[0], (src[0] * phys).T, (src[1] * phys).T, land_d,
+        fig, ax = plt.subplots(3, 3, figsize=(20, 16), dpi=95)
+        # Row 0: ground truth | known area | closest draw
+        IC.plot_field(ax[0, 0], (src[0] * phys).T, (src[1] * phys).T, land_d,
                       f"Ground truth  (frame {src_f})")
-        IC.plot_path(a[1], pm.T, land_d, f"Known area  ({int(pm_ocean.sum())} cells, {cov:.1f}%)")
+        IC.plot_path(ax[0, 1], pm.T, land_d,
+                     f"Known area  ({int(pm_ocean.sum())} cells, {cov:.1f}%)")
         bp = members[best_k]
-        IC.plot_field(a[2], (bp[0] * phys).T, (bp[1] * phys).T, land_d,
+        IC.plot_field(ax[0, 2], (bp[0] * phys).T, (bp[1] * phys).T, land_d,
                       f"Closest model draw (#{best_k})  angle={errs[best_k]:.1f}deg")
-        vmax = max(np.nanpercentile(emp_dir[valid], 99), np.nanpercentile(mod_dir[valid], 99))
-        heatmap(a[3], emp_dir, land_d, f"Empirical uncertainty  ({args.n} data fields)", vmax)
-        heatmap(a[4], mod_dir, land_d, f"Model uncertainty  ({args.n} diffusion draws)", vmax)
-        a[5].scatter(emp_dir[valid], mod_dir[valid], s=4, alpha=0.3, c="tab:blue")
-        lim = max(emp_dir[valid].max(), mod_dir[valid].max())
-        a[5].plot([0, lim], [0, lim], "k--", lw=1)
-        a[5].set_xlabel("empirical spread"); a[5].set_ylabel("model spread")
-        a[5].set_title(f"Per-cell agreement   r(dir)={r_dir:+.2f}  r(std)={r_std:+.2f}",
-                       fontsize=11)
-        a[5].set_aspect("equal", "box")
+
+        # Rows 1-2: empirical (top) vs model (bottom) spread maps,
+        # one column each for ANGLE, MAGNITUDE, MAGNITUDE+ANGLE.
+        modal = [
+            ("Angle spread",      emp_dir, mod_dir, r_dir),
+            ("Magnitude spread",  emp_mag, mod_mag, r_mag),
+            ("Mag+Angle spread",  emp_std, mod_std, r_std),
+        ]
+        for c, (name, emp_m, mod_m, r) in enumerate(modal):
+            vmax = max(np.nanpercentile(emp_m[valid], 99),
+                       np.nanpercentile(mod_m[valid], 99))
+            heatmap(ax[1, c], emp_m, land_d, f"Empirical {name}", vmax)
+            heatmap(ax[2, c], mod_m, land_d, f"Model {name}   r={r:+.2f}", vmax)
         plt.suptitle(
             f"Uncertainty calibration — does model spread match the data manifold?\n"
-            f"frame {src_f}, {cov:.1f}% known   |   directional-spread correlation = {r_dir:+.2f}",
+            f"frame {src_f}, {cov:.1f}% known   |   "
+            f"r(angle)={r_dir:+.2f}   r(magnitude)={r_mag:+.2f}   "
+            f"r(mag+angle)={r_std:+.2f}",
             fontsize=13)
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         os.makedirs(args.out_dir, exist_ok=True)
         out = os.path.join(args.out_dir, f"uncert_frame{src_f}.png")
         fig.savefig(out, bbox_inches="tight"); plt.close(fig)
         print(f"saved -> {out}")
-        return src_f, cov, r_dir, r_std, errs[best_k]
+        return src_f, cov, r_dir, r_mag, r_std, errs[best_k]
 
     if args.frames:
         idxs = [int(x) for x in args.frames.split(",")]
         print(f"\nmulti-frame sweep ({len(idxs)} frames, n={args.n}, "
               f"match_priors={args.match_priors}):")
-        print(f"  {'frame':>6} | {'%known':>6} | {'r_dir':>6} | {'r_std':>6} | {'best°':>6}")
-        rds, rss = [], []
+        print(f"  {'frame':>6} | {'%known':>6} | {'r_angle':>7} | {'r_mag':>7} | "
+              f"{'r_vec':>7} | {'best deg':>8}")
+        rds, rms, rss = [], [], []
         for ix in idxs:
-            src_f, cov, r_dir, r_std, best_ang = eval_frame(ix, make_fig=False)
-            rds.append(r_dir); rss.append(r_std)
-            print(f"  {src_f:>6} | {cov:>5.1f}% | {r_dir:>+.3f} | {r_std:>+.3f} | {best_ang:>5.1f}")
-        rds = np.array(rds); rss = np.array(rss)
-        print(f"\n  r_dir: mean={rds.mean():+.3f}  std={rds.std():.3f}  "
-              f"min={rds.min():+.3f}  max={rds.max():+.3f}")
-        print(f"  r_std: mean={rss.mean():+.3f}  std={rss.std():.3f}")
+            src_f, cov, r_dir, r_mag, r_std, best_ang = eval_frame(ix, make_fig=False)
+            rds.append(r_dir); rms.append(r_mag); rss.append(r_std)
+            print(f"  {src_f:>6} | {cov:>5.1f}% | {r_dir:>+7.3f} | {r_mag:>+7.3f} | "
+                  f"{r_std:>+7.3f} | {best_ang:>7.1f}")
+        rds = np.array(rds); rms = np.array(rms); rss = np.array(rss)
+        print()
+        print(f"  r_angle    (direction-only): mean={rds.mean():+.3f}  "
+              f"std={rds.std():.3f}  min={rds.min():+.3f}  max={rds.max():+.3f}")
+        print(f"  r_mag      (magnitude-only): mean={rms.mean():+.3f}  "
+              f"std={rms.std():.3f}  min={rms.min():+.3f}  max={rms.max():+.3f}")
+        print(f"  r_vec      (mag + angle)   : mean={rss.mean():+.3f}  "
+              f"std={rss.std():.3f}  min={rss.min():+.3f}  max={rss.max():+.3f}")
     else:
-        src_f, cov, r_dir, r_std, best_ang = eval_frame(args.src_idx, make_fig=True)
-        print(f"\nframe {src_f}  ({cov:.1f}% known):  r_dir={r_dir:+.3f}  "
-              f"r_std={r_std:+.3f}  closest_draw_angle={best_ang:.1f}deg")
+        src_f, cov, r_dir, r_mag, r_std, best_ang = eval_frame(args.src_idx, make_fig=True)
+        print(f"\nframe {src_f}  ({cov:.1f}% known):  r_angle={r_dir:+.3f}  "
+              f"r_mag={r_mag:+.3f}  r_vec={r_std:+.3f}  "
+              f"closest_draw_angle={best_ang:.1f}deg")
 
 
 

@@ -590,6 +590,177 @@ class DDPM:
         return total, recon_mse, indiv
 
     # ------------------------------------------------------------------
+    # Directional-spread MATCHING loss (the exact r_dir surrogate)
+    # ------------------------------------------------------------------
+
+    def training_loss_streamfn_spread(
+        self,
+        model:            torch.nn.Module,
+        x0:               torch.Tensor,
+        land_mask:        torch.Tensor,
+        spread_target:    torch.Tensor,
+        lambda_angle:     float = 1.0,
+        min_snr_gamma:    float = 5.0,
+        cond:             torch.Tensor | None = None,
+        parameterization: str = "x0",
+        lambda_mag:       float = 0.0,
+        lambda_spread:    float = 1.0,
+        spread_samples:   int = 8,
+        spread_t_mu:      float = 0.5,
+        spread_t_sigma:   float = 0.25,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        Calibration loss that DIRECTLY optimises the deployment metric r_dir.
+
+        r_dir is the spatial Pearson correlation between the model ensemble's
+        per-cell *directional spread* map (1 − |mean of unit velocity vectors|)
+        and the empirical posterior's directional-spread map.  Every fidelity
+        loss scores a single sample, so it cannot move r_dir; the energy score
+        moved total vector spread but not the angular *pattern* (it supervises a
+        global scalar over full vectors, which uniform inflation games).  This
+        loss removes both failure modes by supervising the angular spread MAP
+        per cell against a precomputed empirical target:
+
+            L_spread = 1 − Pearson( spread_model , spread_target )   over ocean
+
+        which is exactly 1 − (the per-frame r_dir).  Because Pearson is invariant
+        to scale and offset, only the spatial PATTERN of angular ambiguity has to
+        transfer — not its magnitude — so the one-step training spread does not
+        need to equal the full-trajectory inference spread, only correlate with
+        the same target.  That is what makes it transfer-safe.
+
+        Mechanics
+        ---------
+        K predictions are drawn from K independent forward-noise copies of the
+        same x₀ at the SAME timestep t (tiled into one K·B forward pass, as in the
+        energy loss).  Their per-cell directional spread is the model's angular
+        uncertainty at noise level t.  The fidelity terms (Min-SNR recon + angle +
+        optional magnitude) are averaged over all K·B tiled samples and so keep
+        FULL t-range coverage — accuracy is preserved at every noise level, which
+        matters because the inference trajectory passes through all t.  The spread
+        term, however, is only informative in the mid-t band (at high t every
+        prediction collapses to the conditional mean, at low t every prediction
+        collapses to x₀ — both give a near-constant, structureless spread map), so
+        its per-example contribution is weighted by a smooth window
+
+            w(t) = exp( −((t/T − μ)/σ)² )
+
+        peaked at μ·T.  This focuses the spread gradient where the one-step spread
+        map actually has spatial structure.
+
+        Args (additional to training_loss_streamfn):
+            spread_target:  (B, H, W) precomputed empirical directional-spread map
+                            for each example's (fixed) observation path; land
+                            cells must be 0 (they are masked out here anyway).
+            lambda_spread:  weight on the spread-correlation term.
+            spread_samples: K, predictions per example (>=2; >=8 recommended for a
+                            stable per-cell angular spread estimate).
+            spread_t_mu/sigma: centre/width (in units of t/T) of the mid-t window.
+
+        Returns:
+            (total, recon_mse, indiv) with indiv adding
+              "spread_loss"  the 1 − Pearson term actually optimised
+              "spread_r"     window-weighted mean per-frame r_dir surrogate
+                             (higher = better; this is what we want to push up)
+        """
+        if parameterization not in ("x0", "v"):
+            raise ValueError(
+                f"parameterization must be 'x0' or 'v', got {parameterization!r}")
+        K = int(spread_samples)
+        if K < 2:
+            raise ValueError(f"spread_samples must be >= 2, got {K}")
+
+        B = x0.shape[0]
+        t = torch.randint(0, self.T, (B,), device=self.device)
+
+        # Tile to K independent forward-noise copies that SHARE t within a group.
+        t_K    = t.repeat(K)                                   # (K*B,)
+        x0_K   = x0.repeat(K, 1, 1, 1)                         # (K*B, 2, H, W)
+        cond_K = cond.repeat(K, 1, 1, 1) if cond is not None else None
+        xt_K, noise_K = self.q_sample(x0_K, t_K)
+        out = model(xt_K, t_K) if cond_K is None else model(xt_K, t_K, cond_K)
+
+        ocean   = (~land_mask).float()[None, None]            # (1, 1, H, W)
+        n_ocean = ocean.sum().clamp(min=1.0)
+        denom   = (ocean.sum() * (K * B)).clamp(min=1.0)
+
+        ab       = self.alpha_bar[t_K][:, None, None, None]
+        sqrt_ab  = ab.sqrt()
+        sqrt_mab = (1.0 - ab).sqrt()
+
+        if parameterization == "v":
+            v_target = sqrt_ab * noise_K - sqrt_mab * x0_K
+            x0_pred  = sqrt_ab * xt_K - sqrt_mab * out
+            se_v     = ((out - v_target) * ocean) ** 2
+            if min_snr_gamma > 0:
+                snr  = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+                w    = snr.clamp(max=min_snr_gamma) / (snr + 1.0)
+                w    = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+                main = (w * se_v).sum() / denom
+            else:
+                main = se_v.sum() / denom
+        else:
+            x0_pred  = out
+            snr      = (ab / (1.0 - ab).clamp(min=1e-8))[:, 0, 0, 0]
+            w        = snr.clamp(max=min_snr_gamma)
+            w        = (w / w.mean().clamp(min=1e-8))[:, None, None, None]
+            se       = ((x0_pred - x0_K) * ocean) ** 2
+            main     = (w * se).sum() / denom
+
+        recon_mse = (((x0_pred - x0_K) * ocean) ** 2).sum() / denom
+        ang       = _lf_mod.angle_loss(x0_pred, x0_K, ocean)
+        total     = main + lambda_angle * ang
+        indiv     = {"angle": ang}
+
+        if lambda_mag > 0:
+            pred_rms = (((x0_pred ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            true_rms = (((x0_K     ** 2) * ocean).sum(dim=(1, 2, 3))
+                        / (2.0 * n_ocean)).sqrt()
+            mag      = ((pred_rms / true_rms.clamp(min=1e-6) - 1.0) ** 2).mean()
+            total    = total + lambda_mag * mag
+            indiv["mag"] = mag
+
+        # ---- Directional-spread correlation against the empirical target ----
+        eps  = 1e-8
+        H, W = x0.shape[-2:]
+        xhat = x0_pred.view(K, B, 2, H, W)                    # (K, B, 2, H, W)
+
+        # Per-member unit vectors, then resultant length across the K members —
+        # the exact differentiable analogue of infer_cond.directional_spread.
+        u   = xhat[:, :, 0]                                   # (K, B, H, W)
+        v   = xhat[:, :, 1]
+        mag = torch.sqrt(u * u + v * v + eps)                 # near-zero -> ~0 unit
+        uh  = u / mag
+        vh  = v / mag
+        mean_u = uh.mean(dim=0)                               # (B, H, W)
+        mean_v = vh.mean(dim=0)
+        R      = torch.sqrt(mean_u ** 2 + mean_v ** 2 + eps)
+        spread = 1.0 - R                                      # (B, H, W) model spread
+
+        # Per-frame Pearson over ocean cells: spread_model vs spread_target.
+        ocean_flat = (~land_mask).reshape(-1).bool()         # (H*W,)
+        sp = spread.reshape(B, -1)[:, ocean_flat]            # (B, n_ocean)
+        tg = spread_target.reshape(B, -1)[:, ocean_flat].to(sp.dtype)
+        sp = sp - sp.mean(dim=1, keepdim=True)
+        tg = tg - tg.mean(dim=1, keepdim=True)
+        num = (sp * tg).sum(dim=1)
+        den = torch.sqrt((sp * sp).sum(dim=1) * (tg * tg).sum(dim=1) + eps)
+        r   = num / (den + eps)                              # (B,) per-frame r_dir
+
+        # Mid-t window: only count frames whose shared t lands where the one-step
+        # spread map carries spatial structure.
+        tn = t.float() / float(self.T)
+        wt = torch.exp(-((tn - spread_t_mu) / max(spread_t_sigma, 1e-6)) ** 2)
+        wsum = wt.sum().clamp(min=eps)
+        spread_loss = (wt * (1.0 - r)).sum() / wsum
+        total = total + lambda_spread * spread_loss
+        indiv["spread_loss"] = spread_loss
+        indiv["spread_r"]    = (wt * r).sum() / wsum
+
+        return total, recon_mse, indiv
+
+    # ------------------------------------------------------------------
     # Vorticity operator (shared by the vorticity-matching loss)
     # ------------------------------------------------------------------
 

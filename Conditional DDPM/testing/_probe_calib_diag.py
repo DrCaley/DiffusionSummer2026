@@ -80,7 +80,8 @@ def main():
     ap.add_argument("--min_sep", type=int, default=12)
     args = ap.parse_args()
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = ("cuda" if torch.cuda.is_available()
+              else "mps" if torch.backends.mps.is_available() else "cpu")
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     pred_type = ckpt.get("pred_type"); ca = ckpt.get("args", {})
     lags = tuple(ckpt.get("lags", (13, 25))); cond_ch = ckpt.get("cond_ch", 10)

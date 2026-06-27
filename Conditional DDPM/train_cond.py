@@ -87,6 +87,38 @@ class EMA:
 
 
 # ---------------------------------------------------------------------------
+# Spread-target wrapper (directional-spread-matching fine-tune only)
+# ---------------------------------------------------------------------------
+
+class SpreadTargetDataset(torch.utils.data.Dataset):
+    """Attach a precomputed empirical directional-spread target to each item.
+
+    Additive wrapper around ``ConditionalOceanDataset`` so the shared dataset is
+    not modified.  The base dataset MUST be ``deterministic=True`` with a fixed
+    int ``path_steps`` equal to the one the targets were precomputed with, so the
+    observation path the model sees matches the path each target was matched on.
+    """
+
+    def __init__(self, base, targets):
+        if len(base) != len(targets):
+            raise ValueError(
+                f"target count {len(targets)} != dataset length {len(base)}; "
+                "regenerate targets for this split / path_steps.")
+        self.base = base
+        self.targets = torch.as_tensor(targets, dtype=torch.float32)
+        self.land_mask = base.land_mask
+        self.valid = base.valid
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, i):
+        item = self.base[i]
+        item["spread"] = self.targets[i]
+        return item
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -150,6 +182,33 @@ def parse_args():
     p.add_argument("--energy_samples", type=int, default=4,
                    help="K, predictive samples per example for the energy score "
                         "(>=2).  Only used when --lambda_energy > 0.")
+    p.add_argument("--lambda_spread", type=float, default=0.0,
+                   help="Weight on the DIRECTIONAL-SPREAD MATCHING term: "
+                        "1 - Pearson(model_spread_map, empirical_spread_map) over "
+                        "ocean cells — the exact surrogate for the deployment "
+                        "metric r_dir.  Requires --spread_targets.  0 disables "
+                        "(default).  Fine-tune-only; use a fixed --path_steps int "
+                        "that matches the precomputed targets.")
+    p.add_argument("--spread_samples", type=int, default=8,
+                   help="K, predictions per example for the model spread map "
+                        "(>=2; >=8 recommended).  Only used when "
+                        "--lambda_spread > 0.  Each step is K x larger — reduce "
+                        "--batch so K*batch fits memory.")
+    p.add_argument("--spread_targets", default=None,
+                   help="Path to the precomputed TRAIN empirical-spread targets "
+                        ".npy (shape (len(train), H, W); built by "
+                        "testing/precompute_spread_targets.py).  Required when "
+                        "--lambda_spread > 0.")
+    p.add_argument("--spread_val_targets", default=None,
+                   help="Path to the precomputed VAL empirical-spread targets "
+                        ".npy.  Optional: if omitted, the spread term is skipped "
+                        "in validation (val loss then reflects fidelity only).")
+    p.add_argument("--spread_t_mu", type=float, default=0.5,
+                   help="Centre (in t/T) of the mid-t window that weights the "
+                        "spread term toward noise levels where the one-step "
+                        "spread map has spatial structure.")
+    p.add_argument("--spread_t_sigma", type=float, default=0.25,
+                   help="Width (in t/T) of the mid-t spread-term window.")
     p.add_argument("--init", default=None,
                    help="Path to an existing checkpoint to initialise weights "
                         "from (fine-tuning).  Loads the 'model' state dict; the "
@@ -220,10 +279,25 @@ def main():
         data_mean = data_std = None
 
     # ---- Data ----
+    use_spread = args.lambda_spread > 0
+    if use_spread:
+        import numpy as np
+        if args.spread_targets is None:
+            raise ValueError("--lambda_spread > 0 requires --spread_targets.")
+        if isinstance(args.path_steps, (tuple, list)):
+            raise ValueError(
+                "--lambda_spread requires a FIXED int --path_steps that matches "
+                f"the precomputed targets, got {args.path_steps!r}.")
+        print(f"Directional-spread matching: lambda={args.lambda_spread:g} "
+              f"K={args.spread_samples} window mu={args.spread_t_mu:g} "
+              f"sigma={args.spread_t_sigma:g}")
+
+    # Spread matching needs the path fixed per frame (deterministic) so it lines
+    # up with the precomputed target; otherwise train with random-path augmentation.
     train_ds = ConditionalOceanDataset(
         args.pickle, split=0, lags=args.lags,
         data_mean=data_mean, data_std=data_std,
-        path_steps=args.path_steps, deterministic=False,
+        path_steps=args.path_steps, deterministic=use_spread,
         straight_bias=args.straight_bias,
     )
     val_ds = ConditionalOceanDataset(
@@ -232,6 +306,19 @@ def main():
         path_steps=args.path_steps, deterministic=True,   # reproducible val paths
         straight_bias=args.straight_bias,
     )
+
+    val_has_spread = False
+    if use_spread:
+        tr_tgt = np.load(args.spread_targets)
+        train_ds = SpreadTargetDataset(train_ds, tr_tgt)
+        print(f"Loaded train spread targets: {tr_tgt.shape} from {args.spread_targets}")
+        if args.spread_val_targets is not None:
+            va_tgt = np.load(args.spread_val_targets)
+            val_ds = SpreadTargetDataset(val_ds, va_tgt)
+            val_has_spread = True
+            print(f"Loaded val spread targets:   {va_tgt.shape} from {args.spread_val_targets}")
+        else:
+            print("No --spread_val_targets: spread term skipped in validation.")
 
     land_mask = train_ds.land_mask.to(device)   # (H, W) bool
     cond_ch   = cond_channels(args.lags)
@@ -303,6 +390,8 @@ def main():
         param_tag += f"_vort{args.lambda_vort:g}"
     if args.lambda_energy > 0:
         param_tag += f"_en{args.lambda_energy:g}k{args.energy_samples}"
+    if args.lambda_spread > 0:
+        param_tag += f"_spr{args.lambda_spread:g}k{args.spread_samples}"
     run_tag = f"streamfncond_{param_tag}_ang{args.lambda_angle:g}_" \
               f"lags{lag_tag}_{args.noise_type}_{args.schedule}"
 
@@ -316,7 +405,20 @@ def main():
             for batch in loader:
                 x0   = batch["target"].to(device)
                 cond = batch["cond"].to(device)
-                if use_energy:
+                if use_spread and "spread" in batch:
+                    loss, recon_mse, indiv = diffusion.training_loss_streamfn_spread(
+                        model, x0, land_mask, batch["spread"].to(device),
+                        lambda_angle=args.lambda_angle,
+                        min_snr_gamma=args.min_snr_gamma,
+                        cond=cond,
+                        parameterization=args.parameterization,
+                        lambda_mag=args.lambda_mag,
+                        lambda_spread=args.lambda_spread,
+                        spread_samples=args.spread_samples,
+                        spread_t_mu=args.spread_t_mu,
+                        spread_t_sigma=args.spread_t_sigma,
+                    )
+                elif use_energy:
                     loss, recon_mse, indiv = diffusion.training_loss_streamfn_energy(
                         model, x0, land_mask,
                         lambda_angle=args.lambda_angle,
@@ -356,6 +458,8 @@ def main():
                     energy += indiv["energy"].item()
                 if "spread" in indiv:
                     spread += indiv["spread"].item()
+                if "spread_r" in indiv:
+                    spread += indiv["spread_r"].item()
         n = max(len(loader), 1)
         return (tot / n, recon / n, ang / n, mag / n, vort / n,
                 energy / n, spread / n)
@@ -374,6 +478,8 @@ def main():
              "lambda_vort": args.lambda_vort,
              "lambda_energy": args.lambda_energy,
              "energy_samples": args.energy_samples,
+             "lambda_spread": args.lambda_spread,
+             "spread_samples": args.spread_samples,
              "cond_ch": cond_ch,
              "lags": list(args.lags),
              "path_steps": args.path_steps,
@@ -411,10 +517,12 @@ def main():
             vort_str = f" vort={tr_vort:.5f}/{va_vort:.5f}" if args.lambda_vort > 0 else ""
             en_str = (f" en={tr_en:+.5f}/{va_en:+.5f} spr={tr_spr:.5f}/{va_spr:.5f}"
                       if args.lambda_energy > 0 else "")
+            sp_str = (f" r_dir={tr_spr:+.4f}/{va_spr:+.4f}"
+                      if args.lambda_spread > 0 else "")
             print(
                 f"Epoch {epoch:4d}/{args.epochs} | "
                 f"train={tr_tot:.5f} (recon={tr_recon:.5f} ang={tr_ang:.5f}) | "
-                f"val={va_tot:.5f}   (recon={va_recon:.5f} ang={va_ang:.5f}){mag_str}{vort_str}{en_str}{tag}"
+                f"val={va_tot:.5f}   (recon={va_recon:.5f} ang={va_ang:.5f}){mag_str}{vort_str}{en_str}{sp_str}{tag}"
             )
 
         if args.patience > 0 and epochs_since_best >= args.patience:
