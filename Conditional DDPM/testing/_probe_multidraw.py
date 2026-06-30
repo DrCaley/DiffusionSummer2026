@@ -42,8 +42,128 @@ for _p in (_here, os.path.join(_root, "utils"),
 
 import infer_cond as IC                       # noqa: E402
 from _probe_calib_mag import (                # noqa: E402
-    load_magnitude_model, predict_speed_norm, apply_unet_magnitude,
+    load_magnitude_model, predict_speed_norm, apply_unet_magnitude, EPS,
 )
+
+
+def load_hetero_magnitude_model(checkpoint, device):
+    """Load a HeteroMagnitudeUNet -> (net, speed_mean, speed_std, logvar_clip)."""
+    import importlib.util
+    mag_model_path = os.path.join(_root, "Magnitude", "model.py")
+    spec = importlib.util.spec_from_file_location("mag_model_h", mag_model_path)
+    mag = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mag)
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+    base_ch = ckpt.get("args", {}).get("base_ch", 64)
+    in_ch = int(ckpt["model"]["enc0.conv1.weight"].shape[1])
+    sd = ckpt["model"]
+    head_hidden = (int(sd["logvar_head.0.weight"].shape[0])
+                   if any(k.startswith("logvar_head") for k in sd) else 0)
+    net = mag.HeteroMagnitudeUNet(in_ch=in_ch, base_ch=base_ch,
+                                  head_hidden=head_hidden).to(device)
+    net.load_state_dict(ckpt["model"]); net.eval(); net.in_ch = in_ch
+    return (net, float(ckpt["speed_mean"]), float(ckpt["speed_std"]),
+            tuple(ckpt.get("logvar_clip", (-8.0, 4.0))))
+
+
+@torch.no_grad()
+def predict_speed_mean_sigma(net, speed_mean, speed_std, land_mask, data_std,
+                             device, cond, logvar_clip):
+    """Per-cell (mu_norm, sigma_norm) speed from the hetero UNet."""
+    c = cond if torch.is_tensor(cond) else torch.from_numpy(np.asarray(cond))
+    mean, logvar = net(c.unsqueeze(0).to(device).float())
+    mu = mean[0, 0].cpu().numpy()
+    lv = logvar[0, 0].clamp(*logvar_clip).cpu().numpy()
+    mu_phys = np.clip(mu * speed_std + speed_mean, 0.0, None)
+    sigma_phys = np.exp(0.5 * lv) * speed_std
+    mu_phys[land_mask] = 0.0; sigma_phys[land_mask] = 0.0
+    return (mu_phys / data_std).astype(np.float32), (sigma_phys / data_std).astype(np.float32)
+
+
+def hetero_magnitude(members, speed_mu, speed_sigma, ocean_np, base_seed):
+    """Per-draw speed sampled from N(mu, sigma^2), direction from diffusion."""
+    out = []
+    for k, m in enumerate(members):
+        rng = np.random.default_rng(base_seed * 100003 + k)
+        eps = rng.standard_normal(speed_mu.shape).astype(np.float32)
+        spd = np.clip(speed_mu + speed_sigma * eps, 0.0, None)
+        u, v = m[0], m[1]
+        mag = np.sqrt(u ** 2 + v ** 2) + EPS
+        fu = (u / mag * spd).astype(np.float32)
+        fv = (v / mag * spd).astype(np.float32)
+        fu[~ocean_np] = 0.0; fv[~ocean_np] = 0.0
+        out.append(np.stack([fu, fv], axis=0))
+    return out
+
+
+def coupled_magnitude(members, speed_mu, speed_sigma, ocean_np):
+    """
+    DIRECTION-COUPLED, spatially-coherent magnitude calibration (no white noise).
+
+    Reuse the diffusion draw's OWN magnitude anomaly (already smooth and angle-
+    consistent) and rescale it so the ensemble matches the hetero UNet's calibrated
+    per-cell mean mu(x) and std sigma(x):
+
+        m_k(x)  = ||member_k(x)||;  mbar = mean_k m_k;  s = std_k m_k
+        z_k(x)  = (m_k - mbar) / s
+        speed_k = clip( mu + sigma * z_k, 0 )
+    """
+    arr = np.stack(members, axis=0).astype(np.float64)        # (K, 2, H, W)
+    mag = np.sqrt((arr ** 2).sum(axis=1))                     # (K, H, W)
+    mbar = mag.mean(axis=0); s = mag.std(axis=0)
+    z = (mag - mbar[None]) / (s[None] + EPS)
+    out = []
+    for k, m in enumerate(members):
+        spd = np.clip(speed_mu + speed_sigma * z[k], 0.0, None)
+        u, v = m[0], m[1]
+        d = np.sqrt(u ** 2 + v ** 2) + EPS
+        fu = (u / d * spd).astype(np.float32)
+        fv = (v / d * spd).astype(np.float32)
+        fu[~ocean_np] = 0.0; fv[~ocean_np] = 0.0
+        out.append(np.stack([fu, fv], axis=0))
+    return out
+
+
+def reinject_magnitude(members, speed_norm, ocean_np):
+    """
+    Like apply_unet_magnitude, but PRESERVES each draw's RELATIVE magnitude
+    variation instead of flattening every draw to the same speed map.
+
+      speed_k(x) = ||member_k(x)||           (diffusion's own per-draw speed)
+      sbar(x)    = mean_k speed_k(x)
+      fused_k(x) = unit_dir(member_k) * speed_norm(x) * speed_k(x) / sbar(x)
+
+    The ensemble-mean speed stays ~= speed_norm (UNet calibration preserved),
+    but per-draw magnitude diversity from the diffusion is reinjected.
+    """
+    arr = np.stack(members, axis=0).astype(np.float64)        # (K, 2, H, W)
+    speed = np.sqrt((arr ** 2).sum(axis=1))                    # (K, H, W)
+    sbar = speed.mean(axis=0)                                  # (H, W)
+    out = []
+    for m in members:
+        u, v = m[0].astype(np.float64), m[1].astype(np.float64)
+        mag = np.sqrt(u ** 2 + v ** 2) + EPS
+        rel = (np.sqrt(u ** 2 + v ** 2)) / (sbar + EPS)
+        fu = (u / mag * speed_norm * rel).astype(np.float32)
+        fv = (v / mag * speed_norm * rel).astype(np.float32)
+        fu[~ocean_np] = 0.0; fv[~ocean_np] = 0.0
+        out.append(np.stack([fu, fv], axis=0))
+    return out
+
+
+def offpath_diversity(members, mask, data_std):
+    """
+    Mean draw-to-draw RMS vector dispersion over `mask` cells, as a % of the
+    ensemble-mean speed there.  Higher = more diverse / less deterministic.
+    """
+    arr = np.stack(members, axis=0).astype(np.float64)        # (K, 2, H, W)
+    mean = arr.mean(axis=0)
+    disp = np.sqrt(((arr - mean[None]) ** 2).sum(axis=1).mean(axis=0))  # (H, W)
+    mean_spd = np.sqrt((mean ** 2).sum(axis=0))               # (H, W)
+    m = mask & np.isfinite(disp)
+    if m.sum() == 0:
+        return float("nan")
+    return float(100.0 * disp[m].mean() / (mean_spd[m].mean() + EPS))
 
 
 def main():
@@ -58,6 +178,17 @@ def main():
     ap.add_argument("--n_draws", type=int, default=6)
     ap.add_argument("--path_steps", type=int, default=90)
     ap.add_argument("--inference_steps", type=int, default=100)
+    ap.add_argument("--fuse_mode",
+                    choices=["replace", "reinject", "none", "hetero", "coupled"],
+                    default="replace",
+                    help="replace=UNet speed overwrites all draws (deterministic "
+                         "magnitude); reinject=keep per-draw relative magnitude; "
+                         "none=raw diffusion draws, no UNet fusion; "
+                         "hetero=sample per-draw speed from N(mu,sigma^2); "
+                         "coupled=hetero mu/sigma applied to the diffusion's own "
+                         "magnitude anomaly (no white noise, angle-coupled)")
+    ap.add_argument("--hetero_checkpoint",
+                    default="Magnitude/checkpoints_cond_mag_hetero/best_cond_magnitude_hetero.pt")
     ap.add_argument("--out_dir", default="Conditional DDPM/results/cond_multidraw")
     args = ap.parse_args()
 
@@ -114,9 +245,39 @@ def main():
     spd_phys = np.sqrt((src ** 2).sum(axis=0)) * data_std
     speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
                                     land_np, data_std, device, cond=b["cond"])
-    fused = apply_unet_magnitude(members, speed_norm, ocean_np)
+    if args.fuse_mode == "replace":
+        draws = apply_unet_magnitude(members, speed_norm, ocean_np)
+        mode_lbl = "diffusion direction x conditioned-UNet speed (deterministic mag)"
+    elif args.fuse_mode == "reinject":
+        draws = reinject_magnitude(members, speed_norm, ocean_np)
+        mode_lbl = "UNet speed x per-draw relative magnitude (reinjected)"
+    elif args.fuse_mode == "hetero":
+        het_net, hsm, hss, het_clip = load_hetero_magnitude_model(
+            args.hetero_checkpoint, device)
+        mu_n, sig_n = predict_speed_mean_sigma(
+            het_net, hsm, hss, land_np, data_std, device, b["cond"], het_clip)
+        draws = hetero_magnitude(members, mu_n, sig_n, ocean_np, src_idx)
+        mode_lbl = "diffusion direction x speed ~ N(mu,sigma^2) (heteroscedastic)"
+    elif args.fuse_mode == "coupled":
+        het_net, hsm, hss, het_clip = load_hetero_magnitude_model(
+            args.hetero_checkpoint, device)
+        mu_n, sig_n = predict_speed_mean_sigma(
+            het_net, hsm, hss, land_np, data_std, device, b["cond"], het_clip)
+        draws = coupled_magnitude(members, mu_n, sig_n, ocean_np)
+        mode_lbl = "diffusion magnitude anomaly calibrated to UNet mu/sigma (coupled)"
+    else:  # none
+        draws = [m.astype(np.float32) for m in members]
+        mode_lbl = "raw diffusion draws (no UNet fusion)"
+    fused = draws
     fused_mean = np.mean(fused, axis=0).astype(np.float32)
     spread = IC.directional_spread(members, ocean_np)
+
+    # ---- off-path diversity (how non-deterministic the draws really are) ----
+    offpath = ocean_np & (~pm_ocean)
+    div_raw = offpath_diversity(members, offpath, data_std)
+    div_out = offpath_diversity(fused, offpath, data_std)
+    print(f"fuse_mode={args.fuse_mode}  off-path draw-to-draw dispersion: "
+          f"raw diffusion={div_raw:.1f}%  rendered={div_out:.1f}% of mean speed")
 
     # ---- render ----
     s = data_std; land_d = land_np.T; ocean_d = ~land_d
@@ -136,7 +297,7 @@ def main():
                   "Ground truth", vmax=vmax)
     ax[1].axis("on")
     IC.plot_field(ax[1], fused_mean[0].T * s, fused_mean[1].T * s, land_d,
-                  "Fused ensemble mean", vmax=vmax)
+                  "Ensemble mean", vmax=vmax)
     ax[2].axis("on")
     sp = spread.T.copy()
     im = ax[2].imshow(sp, origin="lower", cmap="magma", vmin=0.0, vmax=1.0,
@@ -158,12 +319,13 @@ def main():
                       f"Plausible draw {k + 1}", vmax=vmax)
 
     plt.suptitle(
-        f"Best pipeline — {n} plausible FUSED fields from the SAME conditioning  "
-        f"(frame {src_f}, coverage {cov:.1f}%)\n"
-        f"diffusion direction x conditioned-UNet speed; shared colour scale",
+        f"Best pipeline — {n} plausible fields from the SAME conditioning  "
+        f"(frame {src_f}, coverage {cov:.1f}%, fuse={args.fuse_mode})\n"
+        f"{mode_lbl}; shared colour scale  |  off-path dispersion "
+        f"{div_out:.1f}% of mean speed",
         fontsize=14)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
-    out = os.path.join(args.out_dir, f"multidraw_frame{src_f}.png")
+    out = os.path.join(args.out_dir, f"multidraw_frame{src_f}_{args.fuse_mode}.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"frame {src_f}  coverage {cov:.1f}%  draws {n}")

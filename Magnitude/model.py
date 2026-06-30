@@ -104,3 +104,66 @@ class MagnitudeUNet(nn.Module):
         # Crop back to 94×44 (strip the padding)
         h = h[:, :, 1:-1, 2:-2]
         return h
+
+
+class HeteroMagnitudeUNet(MagnitudeUNet):
+    """
+    MagnitudeUNet + a per-cell log-variance head (heteroscedastic speed).
+
+    The deterministic backbone and ``out_conv`` mean head are byte-for-byte the
+    original ``MagnitudeUNet`` (so a trained checkpoint loads straight into the
+    MEAN path with ``strict=False`` and accuracy is preserved).  A second 1×1
+    conv reads the SAME final decoder features and predicts ``log Var[speed]``.
+
+    ``forward`` returns ``(mean, logvar)`` — both (B, 1, 94, 44).  Sampling a
+    draw's speed as ``mean + exp(0.5*logvar) * eps`` gives a calibrated, genuinely
+    stochastic magnitude (the missing ingredient for r_magnitude / r_overall).
+    """
+
+    def __init__(self, in_ch: int = 3, base_ch: int = 64, logvar_init: float = -2.0,
+                 head_hidden: int = 0):
+        super().__init__(in_ch=in_ch, base_ch=base_ch)
+        self.head_hidden = int(head_hidden)
+        if self.head_hidden > 0:
+            # Higher-capacity, spatially-coherent variance head: two 3×3 convs
+            # (receptive field) then a 1×1 projection.  Reads the SAME frozen
+            # decoder features as the mean head; only these params train.
+            self.logvar_conv = None
+            self.logvar_head = nn.Sequential(
+                nn.Conv2d(base_ch, self.head_hidden, 3, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(self.head_hidden, self.head_hidden, 3, padding=1),
+                nn.SiLU(),
+                nn.Conv2d(self.head_hidden, 1, 1),
+            )
+            nn.init.zeros_(self.logvar_head[-1].weight)
+            nn.init.constant_(self.logvar_head[-1].bias, logvar_init)
+        else:
+            self.logvar_head = None
+            self.logvar_conv = nn.Conv2d(base_ch, 1, 1)
+            nn.init.zeros_(self.logvar_conv.weight)
+            nn.init.constant_(self.logvar_conv.bias, logvar_init)
+
+    def _logvar_from_features(self, h: torch.Tensor) -> torch.Tensor:
+        if self.logvar_conv is not None:
+            return self.logvar_conv(h)
+        return self.logvar_head(h)
+
+    def forward(self, x: torch.Tensor):
+        x = F.pad(x, self._PAD)            # → 96×48
+
+        e0 = self.enc0(x)
+        e1 = self.enc1(self.down(e0))
+        e2 = self.enc2(self.down(e1))
+        e3 = self.enc3(self.down(e2))
+
+        h = self.mid(self.down(e3))
+
+        h = self.up(h); h = self.dec3(torch.cat([h, e3], dim=1))
+        h = self.up(h); h = self.dec2(torch.cat([h, e2], dim=1))
+        h = self.up(h); h = self.dec1(torch.cat([h, e1], dim=1))
+        h = self.up(h); h = self.dec0(torch.cat([h, e0], dim=1))
+
+        mean   = self.out_conv(h)[:, :, 1:-1, 2:-2]            # 94×44
+        logvar = self._logvar_from_features(h)[:, :, 1:-1, 2:-2]  # 94×44
+        return mean, logvar

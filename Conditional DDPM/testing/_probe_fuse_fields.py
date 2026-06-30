@@ -213,6 +213,8 @@ def main():
         k_fus = avg_member_metrics(fused, src, pm_ocean)
         u_raw = avg_member_metrics(members, src, unobs)
         u_fus = avg_member_metrics(fused, src, unobs)
+        a_raw = avg_member_metrics(members, src, ocean_np)
+        a_fus = avg_member_metrics(fused, src, ocean_np)
 
         # ---- empirical neighbour posterior (path + priors) ----
         obs_src = src[:, pm_ocean]; obs_all = fields[:, :, pm_ocean]
@@ -258,8 +260,9 @@ def main():
               f"{k_fus[0]:>5.2f} {k_fus[1]:>5.1f} {k_fus[2]:>6.0f} | "
               f"{u_raw[0]:>9.2f} {u_raw[1]:>5.1f} {u_raw[2]:>6.0f} -> "
               f"{u_fus[0]:>5.2f} {u_fus[1]:>5.1f} {u_fus[2]:>6.0f} | "
-              f"{r_dir:>+6.3f} {r_vraw:>+6.3f} {r_vfus:>+6.3f}")
-        agg.append((k_raw, k_fus, u_raw, u_fus, r_dir, r_vraw, r_vfus))
+              f"{r_dir:>+6.3f} {r_vraw:>+6.3f} {r_vfus:>+6.3f}"
+              f"  || ALL rmse {a_raw[2]:>3.0f}->{a_fus[2]:>3.0f}%")
+        agg.append((k_raw, k_fus, u_raw, u_fus, r_dir, r_vraw, r_vfus, a_raw, a_fus))
 
         # ---- render ----
         fused_mean = np.mean(fused, axis=0).astype(np.float32)
@@ -270,8 +273,8 @@ def main():
                      f"frame {src_f}", src, pm, members[0], fused[0], fused_mean,
                      mod_dir, land_np, data_std, cov, txt)
 
-    a = np.array([[*g[0], *g[1], *g[2], *g[3], g[4], g[5], g[6]] for g in agg],
-                 dtype=np.float64)
+    a = np.array([[*g[0], *g[1], *g[2], *g[3], g[4], g[5], g[6], *g[7], *g[8]]
+                   for g in agg], dtype=np.float64)
     m = np.nanmean(a, axis=0)
     print(f"\n  N={len(agg)} frames  MEAN")
     print(f"  KNOWN  speed {m[0]:.2f}->{m[3]:.2f}x  angle {m[1]:.1f}->{m[4]:.1f}deg"
@@ -279,6 +282,8 @@ def main():
     print(f"  UNOBS  speed {m[6]:.2f}->{m[9]:.2f}x  angle {m[7]:.1f}->{m[10]:.1f}deg"
           f"  rmse {m[8]:.0f}->{m[11]:.0f}%")
     print(f"  r_dir(dir-only) {m[12]:+.3f}   r_vec raw {m[13]:+.3f} -> fused {m[14]:+.3f}")
+    print(f"  ALL-OCEAN  rmse {m[17]:.0f}->{m[20]:.0f}%   speed {m[15]:.2f}->{m[18]:.2f}x"
+          f"  angle {m[16]:.1f}deg")
     print(f"\n  panels saved to: {args.out_dir}/")
 
 
