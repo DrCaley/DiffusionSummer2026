@@ -309,6 +309,35 @@ with `--fuse_mode {replace, reinject, none, hetero, coupled}`; uncertainty maps 
 r_overall **+0.597 ± 0.141** (sample std; the ±0.236 is inflated entirely by the one
 information-limited frame 6800 at r_mag 0.260 — the other five sit 0.55–0.89).
 
+### ★ Large-scale validation — 100 test frames (n_model=40, n_emp=60, seed=0, Jul 1 2026)
+Run on Vast.ai CUDA (Titan Xp). Both probes used the same frames (split=2, path_steps=90,
+inference_steps=100). This supersedes the 6/12-frame estimates above.
+
+**Uncertainty calibration (`_probe_calib_all.py`, fuse_mode=coupled):**
+| metric | mean ± std |
+|---|---|
+| r_angle | +0.713 ± 0.152 |
+| r_magnitude | +0.713 ± 0.144 |
+| r_overall | +0.589 ± 0.118 |
+| ALL-OCEAN rmse% | 77.8% ± 32.9 |
+
+**Field accuracy (`_probe_metrics.py`, ensemble-mean field):**
+| region | model | r_angle | r_mag | r_vec | MSE (m/s)² | angle (°) |
+|---|---|---|---|---|---|---|
+| whole | diffusion only | 0.579 | 0.419 | 0.616 | 0.01406 | 41.0° |
+| whole | **fused (coupled v2)** | **0.596** | **0.758** | **0.709** | **0.00756** | **39.9°** |
+| known | diffusion only | 0.816 | 0.624 | 0.798 | 0.00596 | 16.3° |
+| known | **fused** | **0.820** | **0.926** | **0.862** | **0.00219** | **16.0°** |
+| unobs | diffusion only | 0.574 | 0.416 | 0.612 | 0.01425 | 41.5° |
+| unobs | **fused** | **0.591** | **0.755** | **0.706** | **0.00768** | **40.4°** |
+
+Key findings:
+- Fusion halves whole-ocean MSE (0.01406 → 0.00756); known-cell MSE drops to 0.00219.
+- r_mag jumps +0.339 (0.419 → 0.758) — UNet magnitude fix confirmed at scale.
+- r_angle barely moves (+0.016) as expected (scale-invariant).
+- r_overall calibration +0.589 consistent with previous 6-frame estimate (+0.597).
+- 77.8% rmse% reflects the information-limited far-field floor (perception–distortion tradeoff), not a model bug.
+
 ---
 
 ## DIAGNOSTIC PROBE METRICS (the measurements behind the decisions)
@@ -378,13 +407,14 @@ Near-path angle 12–24° (good); deep/unobserved 22–95° (sample-dependent); 
 ---
 
 ## OPEN / NEXT
-- Validate the retrained **x0 + magnitude-loss** checkpoint: magnitude probe
-  (teacher-forced low-t rms ratio → ~100%), structure probe, 10-sample infer_cond eval
-  on MPS, compare against old x0 on hard samples.
-- Optionally regenerate fused angle×magnitude views via
-  `direction_magnitude_display.py` (`Div_Free_DDPM_Angle_New.pt` + `Magnitude_UNet_New.pt`).
+- ✅ Large-scale 100-frame validation complete (Jul 1 2026) — results in CALIBRATION STUDY above.
+- Repo cleanup: archive dead pipelines (Red Colored Noise, Stride, Voronoi, Model Parameters)
+  and add CLAUDE.md at root for fast session onboarding.
+- Consider next experiment: can we improve the unobserved far-field (currently 40.4° angle,
+  rmse 77.8%)? Options: more temporal priors, longer path coverage augmentation, or a
+  separate far-field prior model.
 - Inference diversity tooling exists (`samplers.py`: vanilla / particle-filter / DPS;
-  `compare_samplers.py`) — run once a good conditional ckpt exists.
+  `compare_samplers.py`) — run comparative diversity eval once repo is cleaned up.
 
 ---
 
