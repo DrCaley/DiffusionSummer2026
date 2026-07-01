@@ -1,0 +1,23 @@
+Geometric schedule stride comparison
+Checkpoint       : Colored Noise Test/red_noise/checkpoints/best_model.pt
+curl_div_weight  : 0.002
+noise_std        : 0.11619
+N samples  : 10
+resample r : 10
+path_steps : 150
+
+  Stride   Steps   Mean RMSE       Std       Min       Max
+--------------------------------------------------------
+      10     100      0.1248    0.0625    0.0506    0.2491
+
+Per-sample breakdown:
+  sample   0: s10=0.1745
+  sample   1: s10=0.0938
+  sample   2: s10=0.0779
+  sample   3: s10=0.0700
+  sample   4: s10=0.0625
+  sample   5: s10=0.1815
+  sample   6: s10=0.2491
+  sample   7: s10=0.1726
+  sample   8: s10=0.0506
+  sample   9: s10=0.1151

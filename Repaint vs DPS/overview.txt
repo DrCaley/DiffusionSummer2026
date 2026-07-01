@@ -1,0 +1,28 @@
+Using model:
+
+
+Test:
+Use 3 different processes to create inference outputs
+
+
+repaint
+
+repaint but with only 1 UNet calls per step (repaint steps) instead of 10
+
+diffusion posterior Sampling
+
+
+Do T=100 steps.
+
+Do 20 nonconsecutive sample seeds. Run all 3 processes on each of these 20 seeds, and compare.
+
+Record the RMSE for each, along with the time taken.
+
+For the first sample seed, also generate an inference output image comparing all 3 predictions.
+
+Find the average RMSE and time for each method.
+
+Record all of this data into files.
+
+Graph the average RMSE and time if an
+
