@@ -406,13 +406,52 @@ Near-path angle 12–24° (good); deep/unobserved 22–95° (sample-dependent); 
 
 ---
 
+## DIVERGENCE STUDY — Jul 1 2026
+
+### Problem
+Coupled fusion (rescaling diffusion magnitude via HeteroMagnitudeUNet) breaks the
+stream-function div-free guarantee. Measured with central-diff ∇·u over interior ocean cells
+(20 frames × 6 draws):
+
+| Stage | mean \|div\| | p95 | vs raw floor |
+|---|---|---|---|
+| Raw diffusion (stream-fn floor) | 0.0585 | 0.198 | 1.0× |
+| Coupled-fused | 0.1250 | 0.388 | 2.13× |
+| + Helmholtz reprojection (5 iters) | 0.1077 | 0.330 | 1.84× |
+
+### Why the floor is non-zero
+Discrete central differences don't give exactly zero divergence for a continuous
+curl — there's an inherent numerical floor of ~0.058. The land mask creates a
+separate issue: re-zeroing land cells after each FFT projection introduces new
+divergence at coastlines, so iterative projection plateaus around 85% of fused
+(can't beat the boundary floor without a masked Poisson solver).
+
+### Helmholtz reprojection: iterative FFT
+Iterate: project → re-mask → project → re-mask × 5. Each pass removes divergence
+the previous re-masking introduced. Capped at 5 to avoid over-correcting.
+Implementation: `helmholtz_project()` in `_probe_calib_mag.py` (shared helper).
+Applied in pipeline after `coupled_magnitude()` in both `_probe_multidraw.py` and
+`_probe_calib_all.py`.
+
+### Effect on accuracy metrics
+| | ang_spread | mag_spread | vec_spread | RMSE% |
+|---|---|---|---|---|
+| Coupled-fused | 0.101 | 0.261 | 0.338 | 79.4% |
+| + Helmholtz reproj | 0.108 | 0.220 | 0.310 | **71.7%** |
+
+**RMSE drops 7.7pp free** — reprojection removes spurious energy in unphysical
+directions. Directional spread essentially unchanged (0.101→0.108), confirming
+directions aren't distorted. Reprojection is now the default pipeline step.
+
+---
+
 ## OPEN / NEXT
 - ✅ Large-scale 100-frame validation complete (Jul 1 2026) — results in CALIBRATION STUDY above.
+- ✅ Helmholtz reprojection added to pipeline (Jul 1 2026) — 7.7pp RMSE improvement, now default.
 - Repo cleanup: archive dead pipelines (Red Colored Noise, Stride, Voronoi, Model Parameters)
   and add CLAUDE.md at root for fast session onboarding.
-- Consider next experiment: can we improve the unobserved far-field (currently 40.4° angle,
-  rmse 77.8%)? Options: more temporal priors, longer path coverage augmentation, or a
-  separate far-field prior model.
+- **Next priority:** improve unobserved far-field (currently 40.4° angle, 77.8% RMSE).
+  Options: more temporal priors, longer path coverage augmentation, separate far-field prior model.
 - Inference diversity tooling exists (`samplers.py`: vanilla / particle-filter / DPS;
   `compare_samplers.py`) — run comparative diversity eval once repo is cleaned up.
 

@@ -44,7 +44,8 @@ for _p in (_here, os.path.join(_root, "utils"),
 import infer_cond as IC  # noqa: E402
 from _probe_calib_mag import (  # noqa: E402
     pcorr, directional_spread, vector_spread, magnitude_spread,
-    apply_unet_magnitude, load_magnitude_model, predict_speed_norm, EPS,
+    apply_unet_magnitude, load_magnitude_model, predict_speed_norm,
+    helmholtz_project, EPS,
 )
 
 
@@ -369,6 +370,7 @@ def main():
             mu_n, sig_n = predict_speed_mean_sigma(
                 het_net, hsm, hss, land_np, data_std, device, b["cond"], het_clip)
             members_fix = coupled_magnitude(members, mu_n, sig_n, ocean_np)
+            members_fix = [helmholtz_project(d, ocean_np) for d in members_fix]
         else:  # none
             members_fix = [m.astype(np.float32) for m in members]
 

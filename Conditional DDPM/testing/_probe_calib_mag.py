@@ -116,6 +116,40 @@ def magnitude_spread(members, ocean_np, mag_norm="abs"):
     return out
 
 
+def helmholtz_project(field, ocean_mask, max_iters=5, tol=1e-4):
+    """
+    Iterative FFT Helmholtz projection to remove the divergent component.
+
+    Single-pass FFT assumes a periodic rectangle; re-zeroing land after each
+    pass introduces new divergence at coastlines, so we iterate:
+        project → re-mask → project → re-mask → ...
+    Converges when mean|div| over interior ocean changes by < tol, capped at
+    max_iters (5 is enough; beyond that the boundary floor dominates).
+    """
+    land = ~ocean_mask
+    ux = field[0].copy().astype(np.float64); ux[land] = 0.0
+    uy = field[1].copy().astype(np.float64); uy[land] = 0.0
+    H, W = ux.shape
+    kx = np.fft.fftfreq(H, d=1.0 / (2 * np.pi))[:, None]
+    ky = np.fft.rfftfreq(W, d=1.0 / (2 * np.pi))[None, :]
+    k2 = kx ** 2 + ky ** 2; k2[0, 0] = 1.0
+    interior = np.zeros((H, W), bool); interior[1:-1, 1:-1] = True
+    check = interior & ocean_mask
+    prev = np.inf
+    for _ in range(max_iters):
+        Ux = np.fft.rfft2(ux); Uy = np.fft.rfft2(uy)
+        Phi = -(1j * kx * Ux + 1j * ky * Uy) / k2; Phi[0, 0] = 0.0
+        ux = np.fft.irfft2(Ux - 1j * kx * Phi, s=(H, W)); ux[land] = 0.0
+        uy = np.fft.irfft2(Uy - 1j * ky * Phi, s=(H, W)); uy[land] = 0.0
+        dux = np.zeros_like(ux); dux[:, 1:-1] = (ux[:, 2:] - ux[:, :-2]) / 2
+        duy = np.zeros_like(uy); duy[1:-1] = (uy[2:] - uy[:-2]) / 2
+        cur = float(np.abs(dux + duy)[check].mean())
+        if abs(prev - cur) / (prev + 1e-12) < tol:
+            break
+        prev = cur
+    return np.stack([ux.astype(np.float32), uy.astype(np.float32)], axis=0)
+
+
 def apply_unet_magnitude(members, speed_norm, ocean_np):
     """
     Replace every member's per-cell speed with `speed_norm` (H, W, normalized

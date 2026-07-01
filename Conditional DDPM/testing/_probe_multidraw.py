@@ -42,7 +42,8 @@ for _p in (_here, os.path.join(_root, "utils"),
 
 import infer_cond as IC                       # noqa: E402
 from _probe_calib_mag import (                # noqa: E402
-    load_magnitude_model, predict_speed_norm, apply_unet_magnitude, EPS,
+    load_magnitude_model, predict_speed_norm, apply_unet_magnitude,
+    helmholtz_project, EPS,
 )
 
 
@@ -264,7 +265,8 @@ def main():
         mu_n, sig_n = predict_speed_mean_sigma(
             het_net, hsm, hss, land_np, data_std, device, b["cond"], het_clip)
         draws = coupled_magnitude(members, mu_n, sig_n, ocean_np)
-        mode_lbl = "diffusion magnitude anomaly calibrated to UNet mu/sigma (coupled)"
+        draws = [helmholtz_project(d, ocean_np) for d in draws]
+        mode_lbl = "diffusion magnitude anomaly calibrated to UNet mu/sigma (coupled+reproj)"
     else:  # none
         draws = [m.astype(np.float32) for m in members]
         mode_lbl = "raw diffusion draws (no UNet fusion)"
