@@ -105,6 +105,47 @@ def divergence(x: torch.Tensor, ocean_mask: torch.Tensor) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
+# Public: curl of a stream function  (inverse pairing of divergence)
+# ---------------------------------------------------------------------------
+
+def curl_from_streamfn(
+    psi:        torch.Tensor,
+    ocean_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    Discrete curl of a scalar stream function ψ → divergence-free (u, v) field.
+
+        u =  ∂ψ/∂y =  ∂ψ/∂W   (W-direction central diff, _kW)
+        v = -∂ψ/∂x = -∂ψ/∂H   (H-direction central diff, _kH)
+
+    Because the separable central-difference operators in H and W commute, the
+    result has EXACTLY zero central-difference divergence in the interior:
+        divergence(curl(ψ)) = _kH(_kW ψ) - _kW(_kH ψ) = 0.
+    Boundary cells carry the standard one-sided (zero-pad) error, identical to
+    the convention used by divergence() and leray_project() above.
+
+    This is the operator implemented inside model.StreamFunctionUNet; it is
+    exposed here for verification and post-hoc evaluation.
+
+    Args:
+        psi:        (B, 1, H, W) scalar stream function.
+        ocean_mask: optional (H, W) bool, True = ocean.  If given, the output
+                    is zeroed at land cells.
+
+    Returns:
+        (B, 2, H, W) divergence-free vector field.
+    """
+    kH = _kH(psi.device, psi.dtype)
+    kW = _kW(psi.device, psi.dtype)
+    u  =  F.conv2d(psi, kW, padding=1)
+    v  = -F.conv2d(psi, kH, padding=1)
+    field = torch.cat([u, v], dim=1)                 # (B, 2, H, W)
+    if ocean_mask is not None:
+        field = field * ocean_mask.to(field.dtype)
+    return field
+
+
+# ---------------------------------------------------------------------------
 # Sparse Laplacian: build + cache  (kept for future Neumann-BC variant)
 # ---------------------------------------------------------------------------
 # Public: leray_project  (spectral Helmholtz projection)

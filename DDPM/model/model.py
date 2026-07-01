@@ -72,9 +72,13 @@ class UNet(nn.Module):
     _PAD  = (2, 2, 1, 1)   # → 44+4=48 wide, 94+2=96 tall
     _UPAD = (2, 2, 1, 1)   # same amounts to strip when unpadding
 
-    def __init__(self, in_ch: int = 2, base_ch: int = 64, time_dim: int = 256):
+    def __init__(self, in_ch: int = 2, base_ch: int = 64, time_dim: int = 256,
+                 out_ch: int | None = None):
         super().__init__()
         self.time_dim = time_dim
+        # Output channels default to the input count (eps / x0 in (u,v) space).
+        # Pass out_ch=1 to emit a single scalar (e.g. a stream function).
+        out_channels = in_ch if out_ch is None else out_ch
         c = base_ch
 
         self.time_mlp = nn.Sequential(
@@ -98,7 +102,7 @@ class UNet(nn.Module):
         self.dec1 = ResBlock(c*2+c*2, c,   time_dim)   # 48×24
         self.dec0 = ResBlock(c  +c,   c,   time_dim)   # 96×48
 
-        self.out_conv = nn.Conv2d(c, in_ch, 1)
+        self.out_conv = nn.Conv2d(c, out_channels, 1)
 
         self.down = nn.MaxPool2d(2)
         self.up   = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
@@ -146,3 +150,73 @@ class UNet(nn.Module):
         # so strip: height [1:-1], width [2:-2]
         h = h[:, :, 1:-1, 2:-2]
         return h
+
+
+# ---------------------------------------------------------------------------
+# Stream-function UNet — divergence-free vector-field predictor
+# ---------------------------------------------------------------------------
+
+class StreamFunctionUNet(nn.Module):
+    """
+    Divergence-free vector-field predictor for incompressible ocean currents.
+
+    A UNet backbone maps the noisy field x_t (in_ch channels) to a single
+    scalar stream function ψ (1 channel).  The discrete curl of ψ yields a
+    2-channel (u, v) field that is divergence-free *by construction*:
+
+        u =  ∂ψ/∂y  =  ∂ψ/∂W   (W-direction central difference)
+        v = -∂ψ/∂x  = -∂ψ/∂H   (H-direction central difference)
+
+    The central-difference kernels match divfree_projection._kW / _kH, so the
+    output has exactly zero central-difference divergence in the interior
+    (boundary cells carry the usual one-sided error).  No Leray projection is
+    ever required.
+
+    This parameterises the clean field x̂₀ directly (x0-prediction), making the
+    network a *calibrated* denoiser whose output is guaranteed incompressible —
+    ideal for coherent / divergence-free eddy structure.
+    """
+
+    def __init__(self, in_ch: int = 2, base_ch: int = 64, time_dim: int = 256,
+                 cond_ch: int = 0):
+        super().__init__()
+        self.in_ch   = in_ch
+        self.cond_ch = cond_ch
+        # The backbone consumes the noisy field (in_ch) plus any conditioning
+        # channels (cond_ch).  It always emits a single scalar stream function.
+        self.backbone = UNet(in_ch=in_ch + cond_ch, base_ch=base_ch,
+                             time_dim=time_dim, out_ch=1)
+
+        # Central-difference kernels (identical to divfree_projection._kH/_kW).
+        kH = torch.tensor(
+            [[[[0., -1., 0.], [0., 0., 0.], [0., 1., 0.]]]]) / 2.0   # ∂/∂H = ∂/∂x
+        kW = torch.tensor(
+            [[[[0., 0., 0.], [-1., 0., 1.], [0., 0., 0.]]]]) / 2.0   # ∂/∂W = ∂/∂y
+        self.register_buffer("_kH", kH)
+        self.register_buffer("_kW", kW)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor,
+                cond: torch.Tensor | None = None) -> torch.Tensor:
+        """
+        Args:
+            x:    (B, in_ch, 94, 44) noisy field x_t
+            t:    (B,) integer timesteps
+            cond: (B, cond_ch, 94, 44) optional conditioning channels, stacked
+                  onto x before the backbone.  Must be provided iff the model
+                  was built with cond_ch > 0.
+        Returns:
+            (B, 2, 94, 44) divergence-free predicted clean field x̂₀
+        """
+        if self.cond_ch > 0:
+            if cond is None:
+                raise ValueError(
+                    f"model built with cond_ch={self.cond_ch} but cond is None")
+            inp = torch.cat([x, cond], dim=1)           # (B, in_ch+cond_ch, H, W)
+        else:
+            if cond is not None:
+                raise ValueError("model built with cond_ch=0 but cond was given")
+            inp = x
+        psi = self.backbone(inp, t)                     # (B, 1, H, W)
+        u   =  F.conv2d(psi, self._kW, padding=1)       # ∂ψ/∂y
+        v   = -F.conv2d(psi, self._kH, padding=1)       # -∂ψ/∂x
+        return torch.cat([u, v], dim=1)                 # (B, 2, H, W)

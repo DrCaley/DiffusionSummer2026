@@ -1,7 +1,0 @@
-Device     : cuda
-Cond mode  : both
-Checkpoint : /root/ocean_diffusion/Conditional DDPM/checkpoints_both/best_cond_ddpm_both_cosine.pt
-Output dir : /root/ocean_diffusion/Conditional DDPM/results_both
-Val set size: 1965  |  samples: [1663, 1598, 1246, 1000, 528, 80, 32, 603, 344, 147]
-Loaded checkpoint  epoch=106  val_loss=0.00366
-  [ 1/10]  sample=1663  seed=1  RMSE=0.1961

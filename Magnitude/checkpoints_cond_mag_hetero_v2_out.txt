@@ -1,0 +1,30 @@
+Device: mps
+data_std = 0.10628  (component normalization)
+Computing training-split physical speed statistics...
+  speed mean = 0.1301   std = 0.1000
+cond channels = 10   lags = (13, 25)   path_steps = (30, 200)
+warm-start from Cond_Magnitude_UNet.pt: loaded 90 tensors; new (variance head) = ['logvar_head.0.weight', 'logvar_head.0.bias', 'logvar_head.2.weight', 'logvar_head.2.bias', 'logvar_head.4.weight', 'logvar_head.4.bias']
+FROZEN backbone+mean; training only: ['logvar_head.0.weight', 'logvar_head.0.bias', 'logvar_head.2.weight', 'logvar_head.2.bias', 'logvar_head.4.weight', 'logvar_head.4.bias']
+Trainable parameters: 27,745
+Epoch   1/20 | lr=1.00e-03 | train_nll=-0.82406 | val_nll=-0.54433 | mean_sigma(phys)=0.0326 *
+Epoch   2/20 | lr=2.00e-03 | train_nll=-0.84826 | val_nll=-0.47835 | mean_sigma(phys)=0.0293
+Epoch   3/20 | lr=1.99e-03 | train_nll=-0.85094 | val_nll=-0.46690 | mean_sigma(phys)=0.0277
+Epoch   4/20 | lr=1.94e-03 | train_nll=-0.85459 | val_nll=-0.55174 | mean_sigma(phys)=0.0307 *
+Epoch   5/20 | lr=1.87e-03 | train_nll=-0.85604 | val_nll=-0.50820 | mean_sigma(phys)=0.0289
+Epoch   6/20 | lr=1.78e-03 | train_nll=-0.85769 | val_nll=-0.49732 | mean_sigma(phys)=0.0288
+Epoch   7/20 | lr=1.66e-03 | train_nll=-0.85962 | val_nll=-0.51593 | mean_sigma(phys)=0.0290
+Epoch   8/20 | lr=1.52e-03 | train_nll=-0.85972 | val_nll=-0.50094 | mean_sigma(phys)=0.0281
+Epoch   9/20 | lr=1.37e-03 | train_nll=-0.86256 | val_nll=-0.48498 | mean_sigma(phys)=0.0277
+Epoch  10/20 | lr=1.21e-03 | train_nll=-0.86451 | val_nll=-0.51648 | mean_sigma(phys)=0.0286
+Epoch  11/20 | lr=1.05e-03 | train_nll=-0.86587 | val_nll=-0.50353 | mean_sigma(phys)=0.0281
+Epoch  12/20 | lr=8.85e-04 | train_nll=-0.86832 | val_nll=-0.52287 | mean_sigma(phys)=0.0288
+Epoch  13/20 | lr=7.25e-04 | train_nll=-0.87312 | val_nll=-0.50889 | mean_sigma(phys)=0.0280
+Epoch  14/20 | lr=5.75e-04 | train_nll=-0.87032 | val_nll=-0.53015 | mean_sigma(phys)=0.0289
+Epoch  15/20 | lr=4.39e-04 | train_nll=-0.87284 | val_nll=-0.49438 | mean_sigma(phys)=0.0277
+Epoch  16/20 | lr=3.22e-04 | train_nll=-0.87212 | val_nll=-0.51206 | mean_sigma(phys)=0.0283
+Epoch  17/20 | lr=2.27e-04 | train_nll=-0.87923 | val_nll=-0.50561 | mean_sigma(phys)=0.0280
+Epoch  18/20 | lr=1.57e-04 | train_nll=-0.87567 | val_nll=-0.52487 | mean_sigma(phys)=0.0288
+Epoch  19/20 | lr=1.14e-04 | train_nll=-0.87149 | val_nll=-0.53041 | mean_sigma(phys)=0.0290
+Epoch  20/20 | lr=1.00e-04 | train_nll=-0.87364 | val_nll=-0.52086 | mean_sigma(phys)=0.0286
+
+Done. Best val NLL: -0.55174  ->  Magnitude/checkpoints_cond_mag_hetero_v2/best_cond_magnitude_hetero.pt

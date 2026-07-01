@@ -56,6 +56,11 @@ def parse_args():
     p.add_argument("--normalize", action="store_true",
                    help="Normalize data to unit std (ocean cells) before training. "
                         "Stats are saved in the checkpoint for inference.")
+    p.add_argument("--std_only", action="store_true",
+                   help="Angle-preserving normalization: divide by std but do NOT "
+                        "subtract the mean (mean forced to 0). Use this for the angle "
+                        "loss so vector directions are not rotated. Takes precedence "
+                        "over --normalize. Stats are saved in the checkpoint.")
     return p.parse_args()
 
 
@@ -87,7 +92,13 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     # ---- Data ----
-    if args.normalize:
+    if args.std_only:
+        # Angle-preserving: divide by std only, mean forced to 0 so directions
+        # are never rotated (uniform scaling preserves vector angles exactly).
+        _, data_std = OceanCurrentDataset.compute_stats(args.pickle, split=0)
+        data_mean = 0.0
+        print(f"Std-only normalization (angle-preserving): mean=0.0  std={data_std:.5f}")
+    elif args.normalize:
         data_mean, data_std = OceanCurrentDataset.compute_stats(args.pickle, split=0)
         print(f"Normalizing data: mean={data_mean:.5f}  std={data_std:.5f}")
     else:

@@ -22,17 +22,30 @@ divergence-free projection is just the orthogonal complement of k:
 After this, kx·û' + ky·v̂' = 0 exactly.
 The k=0 (DC / mean) mode has |k|²=0, so we leave it unchanged.
 
+IMPORTANT — which discrete divergence operator
+-----------------------------------------------
+``kx`` and ``ky`` here are the **central-difference** Fourier symbols
+``sin(2π·fftfreq)``, NOT the spectral derivative symbol ``2π·fftfreq``.  The
+rest of the pipeline (model.StreamFunctionUNet's curl, the curl_div loss, and
+divfree_projection.divergence) all use the central-difference stencil
+[-1, 0, 1]/2.  Projecting onto the spectral symbol leaves a large
+*central-difference* divergence (mean|div| ≈ 0.4 — comparable to the field
+magnitude) that leaks into every sampled field; projecting onto sin(2π·fftfreq)
+makes the noise divergence-free under the **same** operator the model and the
+metric use, so the whole reverse-diffusion trajectory stays divergence-free.
+
 Implementation steps
 --------------------
 1.  Sample two independent Gaussian fields  (u, v) ∼ N(0, I).
-2.  Apply rfft2 to get complex Fourier coefficients.
-3.  Build the wavenumber grid (kx via rfftfreq, ky via fftfreq).
+2.  Apply fft2 to get complex Fourier coefficients.
+3.  Build the central-difference symbol grid (sin(2π·fftfreq) per axis).
 4.  Apply the Helmholtz projection to each Fourier mode.
-5.  Apply irfft2 to get back a real spatial field.
-6.  Normalise each (sample, channel) to unit std so statistics match randn.
+5.  Apply ifft2 to get back a real spatial field.
+6.  Normalise each sample to unit std (single scalar, both channels) so the
+    divergence-free property is preserved and statistics match randn.
 
-The output is divergence-free in the periodic-domain sense — this is exact,
-not approximate.  It has the same spatial extent and dtype as randn would.
+The output is divergence-free under the central-difference operator — exact up
+to float rounding, not approximate.  Same spatial extent and dtype as randn.
 """
 
 import torch
@@ -98,18 +111,31 @@ def divergence_free_noise(
         hat_v[:, :, W // 2] = 0.0
 
     # ------------------------------------------------------------------
-    # 3. Wavenumber grids (normalised cycles per grid cell)
+    # 3. Wavenumber grids — CENTRAL-DIFFERENCE Fourier symbols
+    #
+    #    The whole pipeline measures divergence with the central-difference
+    #    stencil [-1, 0, 1] / 2 (model.StreamFunctionUNet's curl and
+    #    divfree_projection.divergence both use it).  The Fourier symbol of that
+    #    stencil along an axis of length N at frequency index m is
+    #        i · sin(2π m / N),
+    #    NOT the spectral derivative symbol i·(2π m / N).  Projecting onto the
+    #    spectral symbol (the old code, kx = fftfreq(H)) makes the noise
+    #    divergence-free in the periodic-FFT sense but leaves a LARGE central-
+    #    difference divergence (mean|div| ≈ 0.4, comparable to the field itself),
+    #    which then leaks into every sampled field.  Using sin(2π·fftfreq) makes
+    #    the noise divergence-free under the SAME discrete operator the model and
+    #    the metric use, so the entire reverse trajectory stays div-free.
     #
     #    Physical layout of (H, W) = (94, 44) for this dataset:
-    #      dim -2 (H = 94) = east-west (x) axis  → kx = fftfreq(H)
-    #      dim -1 (W = 44) = north-south (y) axis → ky = fftfreq(W)
+    #      dim -2 (H) = east-west (x) axis  → symbol pairs with u (channel 0)
+    #      dim -1 (W) = north-south (y) axis → symbol pairs with v (channel 1)
     #
-    #    Divergence-free condition:  kx·û + ky·v̂ = 0
-    #      kx pairs with u (east-west velocity, channel 0)
-    #      ky pairs with v (north-south velocity, channel 1)
+    #    Central-difference divergence-free condition:
+    #        sin(θ_H)·û + sin(θ_W)·v̂ = 0      (θ = 2π·fftfreq)
     # ------------------------------------------------------------------
-    kx = torch.fft.fftfreq(H, d=1.0, device=cpu_device).view(H, 1)   # (H, 1)
-    ky = torch.fft.fftfreq(W, d=1.0, device=cpu_device).view(1, W)    # (1, W)
+    two_pi = 2.0 * torch.pi
+    kx = torch.sin(two_pi * torch.fft.fftfreq(H, d=1.0, device=cpu_device)).view(H, 1)
+    ky = torch.sin(two_pi * torch.fft.fftfreq(W, d=1.0, device=cpu_device)).view(1, W)
     k2 = kx ** 2 + ky ** 2   # (H, W)
 
     # ------------------------------------------------------------------
