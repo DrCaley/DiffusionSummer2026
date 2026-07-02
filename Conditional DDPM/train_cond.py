@@ -241,6 +241,12 @@ def parse_args():
                         "(default 120,200 — known-cell count varies but not too much).")
     p.add_argument("--straight_bias", type=float, default=0.75,
                    help="Directional-persistence bias for the biased random walk.")
+    p.add_argument("--cfg_dropout", type=float, default=0.0,
+                   help="Classifier-Free Guidance dropout rate (0–1).  At each "
+                        "training step, zero the entire conditioning tensor with "
+                        "this probability so the model learns an unconditional "
+                        "branch.  At inference use --cfg_scale > 1.0 to amplify "
+                        "the conditioning signal.  0 disables (default).")
     return p.parse_args()
 
 
@@ -321,8 +327,11 @@ def main():
             print("No --spread_val_targets: spread term skipped in validation.")
 
     land_mask = train_ds.land_mask.to(device)   # (H, W) bool
-    cond_ch   = cond_channels(args.lags)
-    print(f"Lags: {args.lags}  path_steps: {args.path_steps}  cond_channels: {cond_ch}")
+    has_bathy = getattr(train_ds, "has_bathy", False)
+    cond_ch   = cond_channels(args.lags, has_bathy=has_bathy)
+    cfg_tag   = f"_cfg{args.cfg_dropout:g}" if args.cfg_dropout > 0 else ""
+    print(f"Lags: {args.lags}  path_steps: {args.path_steps}  "
+          f"cond_channels: {cond_ch}  bathy: {has_bathy}  cfg_dropout: {args.cfg_dropout:g}")
     print(f"Samples: train={len(train_ds)}  val={len(val_ds)}")
 
     train_loader = DataLoader(
@@ -392,10 +401,13 @@ def main():
         param_tag += f"_en{args.lambda_energy:g}k{args.energy_samples}"
     if args.lambda_spread > 0:
         param_tag += f"_spr{args.lambda_spread:g}k{args.spread_samples}"
+    if args.cfg_dropout > 0:
+        param_tag += f"_cfg{args.cfg_dropout:g}"
     run_tag = f"streamfncond_{param_tag}_ang{args.lambda_angle:g}_" \
               f"lags{lag_tag}_{args.noise_type}_{args.schedule}"
 
     use_energy = args.lambda_energy > 0
+    use_cfg    = args.cfg_dropout > 0
 
     def run_epoch(loader, train: bool):
         model.train(train)
@@ -405,6 +417,13 @@ def main():
             for batch in loader:
                 x0   = batch["target"].to(device)
                 cond = batch["cond"].to(device)
+                # CFG dropout: zero the conditioning for a fraction of training steps
+                # so the model learns an unconditional branch alongside the conditional one.
+                if use_cfg and train:
+                    drop_mask = torch.rand(cond.shape[0], device=device) < args.cfg_dropout
+                    if drop_mask.any():
+                        cond = cond.clone()
+                        cond[drop_mask] = 0.0
                 if use_spread and "spread" in batch:
                     loss, recon_mse, indiv = diffusion.training_loss_streamfn_spread(
                         model, x0, land_mask, batch["spread"].to(device),
@@ -481,6 +500,8 @@ def main():
              "lambda_spread": args.lambda_spread,
              "spread_samples": args.spread_samples,
              "cond_ch": cond_ch,
+             "has_bathy": has_bathy,
+             "cfg_dropout": args.cfg_dropout,
              "lags": list(args.lags),
              "path_steps": args.path_steps,
              "val_loss": val_loss,

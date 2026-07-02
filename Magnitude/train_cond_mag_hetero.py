@@ -137,14 +137,19 @@ def main():
 
     lags = tuple(int(x) for x in args.lags.split(","))
     path_steps = parse_path_steps(args.path_steps)
-    cond_ch = cond_channels(lags)
+    import pickle as _pickle
+    with open(args.pickle, "rb") as _pf:
+        _pdata = _pickle.load(_pf)
+    has_bathy = "bathy" in _pdata
+    del _pdata
+    cond_ch = cond_channels(lags, has_bathy=has_bathy)
 
     data_mean, data_std = ConditionalOceanDataset.compute_stats(args.pickle, split=0)
     print(f"data_std = {data_std:.5f}  (component normalization)")
     print("Computing training-split physical speed statistics...")
     speed_mean, speed_std = speed_stats_chrono(args.pickle, data_std, lags, split=0)
     print(f"  speed mean = {speed_mean:.4f}   std = {speed_std:.4f}")
-    print(f"cond channels = {cond_ch}   lags = {lags}   path_steps = {path_steps}")
+    print(f"cond channels = {cond_ch}   lags = {lags}   path_steps = {path_steps}   bathy = {has_bathy}")
 
     train_ds = CondMagnitudeDataset(args.pickle, split=0, speed_mean=speed_mean,
                                     speed_std=speed_std, data_std=data_std,

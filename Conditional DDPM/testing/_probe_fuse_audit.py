@@ -214,7 +214,7 @@ def main():
         # means rebuilding cond with an empty observation set (priors + geometry
         # only); for the 3-channel UNet the empty path_mask alone erases it.
         empty_pm = np.zeros_like(pm)
-        empty_obs = IC.observation_channels(b["target"], empty_pm)
+        empty_obs = IC.observation_channels(b["target"], empty_pm, ds._land_np)
         empty_cond = IC.assemble_cond(empty_obs, b["priors"], ds.geom)
         speed_empty = predict_speed_norm(mag_net, sm, ss, spd_phys, empty_pm,
                                          land_np, data_std, device,

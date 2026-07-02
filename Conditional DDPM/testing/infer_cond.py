@@ -218,7 +218,7 @@ def build_cond(ds, idx, path_steps, seed):
     priors = torch.cat([ds.fields[f - L] for L in ds.lags], dim=0)
     path_mask = biased_walk_path(ds._land_np, n_steps=path_steps,
                                  seed=seed, straight_bias=ds.straight_bias)
-    obs  = observation_channels(target, path_mask)               # (3, H, W)
+    obs  = observation_channels(target, path_mask, ds._land_np)  # (4, H, W)
     cond = assemble_cond(obs, priors, ds.geom)                   # (C, H, W)
     return {"target": target, "priors": priors, "cond": cond, "path_mask": path_mask}
 
@@ -232,20 +232,42 @@ def sample_capture(stream_model, diffusion, cond, land_np, args, device, seed):
     """
     Draw one conditional posterior sample, capturing (t, x_t, x_hat_0) frames.
 
-    The conditioning is baked into the correct eps-equivalent adapter for the
-    checkpoint's parameterization (EpsFromStreamFn for x0, EpsFromV for v) so the
-    standard `p_sample_step` reverse loop runs unchanged.  x_hat_0 is recovered
-    via `x0_from_output` and is divergence-free by construction.
+    If args.cfg_scale > 1.0 and the model was trained with --cfg_dropout, runs
+    Classifier-Free Guidance at each reverse step:
+        x0_guided = x0_uncond + cfg_scale * (x0_cond - x0_uncond)
+    This costs one extra forward pass per step but sharpens conditioning fidelity.
 
     Returns (final_pred_np (2,H,W), frames list of (t_int, xt_np, x0hat_np)).
     """
     H, W = land_np.shape
-    ocean_f = torch.from_numpy(~land_np).float().to(device)[None, None]
-    cond_b  = cond.unsqueeze(0).to(device)                       # (1, C, H, W)
+    ocean_f   = torch.from_numpy(~land_np).float().to(device)[None, None]
+    cond_b    = cond.unsqueeze(0).to(device)                     # (1, C, H, W)
     pred_type = getattr(args, "pred_type", "x0_streamfn_cond")
+    cfg_scale = float(getattr(args, "cfg_scale", 1.0))
+    use_cfg   = cfg_scale > 1.0
 
-    eps_model = eps_wrapper_for(stream_model, diffusion, pred_type,
-                                cond=cond_b).to(device)
+    if use_cfg:
+        uncond_b = torch.zeros_like(cond_b)                      # all-zeros = unconditioned
+
+    def _x0_from_xt(xt_, t_t, cond_in):
+        out = stream_model(xt_, t_t, cond_in)
+        return x0_from_output(diffusion, xt_, out, t_t, pred_type)
+
+    if use_cfg:
+        # Build a guided eps model by wrapping the CFG blending into a custom callable.
+        class _CFGModel(torch.nn.Module):
+            def forward(self_, xt_, t_):
+                x0_cond   = _x0_from_xt(xt_, t_, cond_b)
+                x0_uncond = _x0_from_xt(xt_, t_, uncond_b)
+                x0_guided = x0_uncond + cfg_scale * (x0_cond - x0_uncond)
+                # Re-encode guided x0 back to epsilon for the p_sample_step loop.
+                alpha_bar = diffusion.alpha_bar[t_[0]]
+                eps = (xt_ - alpha_bar.sqrt() * x0_guided) / (1 - alpha_bar).sqrt().clamp(min=1e-8)
+                return eps
+        eps_model = _CFGModel().to(device)
+    else:
+        eps_model = eps_wrapper_for(stream_model, diffusion, pred_type,
+                                    cond=cond_b).to(device)
 
     torch.manual_seed(seed)
     xt = diffusion._sample_noise(torch.empty(1, 2, H, W, device=device))
@@ -256,8 +278,13 @@ def sample_capture(stream_model, diffusion, cond, land_np, args, device, seed):
 
     def x0hat_np(xt_, t_):
         t_t = torch.full((1,), max(t_, 0), device=device, dtype=torch.long)
-        out = stream_model(xt_, t_t, cond_b)
-        x0  = x0_from_output(diffusion, xt_, out, t_t, pred_type)
+        if use_cfg:
+            x0_cond   = _x0_from_xt(xt_, t_t, cond_b)
+            x0_uncond = _x0_from_xt(xt_, t_t, uncond_b)
+            x0 = x0_uncond + cfg_scale * (x0_cond - x0_uncond)
+        else:
+            out = stream_model(xt_, t_t, cond_b)
+            x0  = x0_from_output(diffusion, xt_, out, t_t, pred_type)
         return (x0 * ocean_f).squeeze(0).cpu().numpy()
 
     for step_i, (t_int, t_prev_int) in enumerate(schedule):
@@ -425,6 +452,10 @@ def parse_args():
                    help="Robot-path length (fixed at inference).")
     p.add_argument("--fps", type=int, default=10)
     p.add_argument("--no_gif", action="store_true", help="Skip the denoising GIF.")
+    p.add_argument("--cfg_scale", type=float, default=1.0,
+                   help="Classifier-Free Guidance scale w > 1.0 amplifies conditioning. "
+                        "Only effective when the checkpoint was trained with --cfg_dropout > 0. "
+                        "1.0 = no guidance (default).  Try 1.5–3.0.")
     p.add_argument("--out_dir", default="Conditional DDPM/results/cond_streamfn")
     return p.parse_args()
 
@@ -461,20 +492,26 @@ def main():
             f"Expected pred_type 'x0_streamfn_cond' or 'v_streamfn_cond', got "
             f"{pred_type!r}.  Use direction_magnitude_display.py for "
             "unconditional models.")
-    args.pred_type = pred_type
     ca        = ckpt.get("args", {})
     base_ch   = ca.get("base_ch", 64)
     time_dim  = ca.get("time_dim", 256)
     T         = ca.get("T", 1000)
     noise_type = ca.get("noise_type", "div_free")
     schedule  = ca.get("schedule", "cosine")
-    lags      = tuple(ckpt.get("lags", ca.get("lags", (13, 25))))
-    cond_ch   = ckpt.get("cond_ch", cond_channels(lags))
-    data_mean = ckpt.get("data_mean", 0.0)
-    data_std  = ckpt.get("data_std", None)
+    lags        = tuple(ckpt.get("lags", ca.get("lags", (13, 25))))
+    has_bathy   = ckpt.get("has_bathy", False)
+    cfg_dropout = ckpt.get("cfg_dropout", 0.0)
+    cond_ch     = ckpt.get("cond_ch", cond_channels(lags, has_bathy=has_bathy))
+    data_mean   = ckpt.get("data_mean", 0.0)
+    data_std    = ckpt.get("data_std", None)
     spectral_filter = ckpt.get("spectral_filter", None)
+    args.pred_type  = pred_type
+    if args.cfg_scale > 1.0 and cfg_dropout == 0.0:
+        print(f"WARNING: --cfg_scale={args.cfg_scale} requested but checkpoint has "
+              "cfg_dropout=0 (no unconditional branch trained).  CFG may degrade output.")
     print(f"Model      : epoch {ckpt.get('epoch','?')}  val={ckpt.get('val_loss', float('nan')):.5f}  "
-          f"lags={lags}  cond_ch={cond_ch}  noise={noise_type}  pred={pred_type}")
+          f"lags={lags}  cond_ch={cond_ch}  noise={noise_type}  pred={pred_type}  "
+          f"cfg_dropout={cfg_dropout}  cfg_scale={args.cfg_scale}")
 
     # ---- Data (same normalization the model trained with) ----
     ds = ConditionalOceanDataset(
