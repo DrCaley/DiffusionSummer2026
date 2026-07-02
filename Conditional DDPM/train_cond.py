@@ -329,7 +329,6 @@ def main():
     land_mask = train_ds.land_mask.to(device)   # (H, W) bool
     has_bathy = getattr(train_ds, "has_bathy", False)
     cond_ch   = cond_channels(args.lags, has_bathy=has_bathy)
-    cfg_tag   = f"_cfg{args.cfg_dropout:g}" if args.cfg_dropout > 0 else ""
     print(f"Lags: {args.lags}  path_steps: {args.path_steps}  "
           f"cond_channels: {cond_ch}  bathy: {has_bathy}  cfg_dropout: {args.cfg_dropout:g}")
     print(f"Samples: train={len(train_ds)}  val={len(val_ds)}")
