@@ -11,9 +11,9 @@ conditional stream-function model needs at training time:
 The conditioning tensor stacks three groups, in this fixed order (see
 ``assemble_cond``):
 
-    observation (soft):  obs_u, obs_v, path_mask            3 channels
-    temporal prior:      prev_L0(u,v), prev_L1(u,v), ...    2 * len(lags)
-    geometry (static):   coord_x, coord_y, dist_coast       3 channels
+    observation (soft):  obs_u, obs_v, path_mask, dist_to_path   4 channels
+    temporal prior:      prev_L0(u,v), prev_L1(u,v), ...         2 * len(lags)
+    geometry (static):   coord_x, coord_y, dist_coast[, bathy]   3 or 4 channels
 
 Design notes
 ------------
@@ -26,9 +26,14 @@ Design notes
 * The observation channels reveal the TRUE field on a robot path.  At training
   time the path is a fresh random ``biased_walk_path`` (augmentation); at
   inference time the same channels are filled from the real measurements.
+* dist_to_path gives each ocean cell its Euclidean distance to the nearest
+  observed cell (normalized [0,1]).  This lets both models spatially localize
+  uncertainty — cells far from the path should be treated differently.
 * Prior fields are normalized with the SAME (mean, std) as the target — they are
   the same physical quantity — so the network sees a consistent scale.
 * The geometry channels are derived for free from the land mask (no extra data).
+  If a ``bathy`` array is stored in the pickle it is added as a 4th geometry
+  channel (static, normalized to [0,1] over ocean cells).
 """
 
 import pickle
@@ -45,28 +50,34 @@ from paths   import biased_walk_path
 DEFAULT_LAGS = (13, 25)
 
 # Number of conditioning channels that are NOT the temporal priors.
-_N_OBS_CH  = 3   # obs_u, obs_v, path_mask
-_N_GEOM_CH = 3   # coord_x, coord_y, dist_coast
+_N_OBS_CH  = 4   # obs_u, obs_v, path_mask, dist_to_path
+_N_GEOM_CH = 3   # coord_x, coord_y, dist_coast  (+ 1 if bathy present)
 
 
-def cond_channels(lags=DEFAULT_LAGS) -> int:
+def cond_channels(lags=DEFAULT_LAGS, has_bathy: bool = False) -> int:
     """Total conditioning-channel count for a given set of lags."""
-    return _N_OBS_CH + 2 * len(tuple(lags)) + _N_GEOM_CH
+    geom_ch = _N_GEOM_CH + (1 if has_bathy else 0)
+    return _N_OBS_CH + 2 * len(tuple(lags)) + geom_ch
 
 
-def geometry_channels(land_mask: torch.Tensor) -> torch.Tensor:
+def geometry_channels(land_mask: torch.Tensor,
+                      bathy: np.ndarray | None = None) -> torch.Tensor:
     """
-    Build the 3 static geometry channels from the land mask.
+    Build static geometry channels from the land mask (and optional bathymetry).
 
     Args:
         land_mask: (H, W) bool tensor, True = land.
+        bathy:     (H, W) float array of water depth (positive = deeper).
+                   If provided, added as a 4th channel normalized to [0, 1]
+                   over ocean cells; land cells are set to 0.
 
     Returns:
-        (3, H, W) float32 tensor: [coord_x, coord_y, dist_coast]
+        (3 or 4, H, W) float32 tensor:
             coord_x    — normalized column position in [-1, 1]
             coord_y    — normalized row position in [-1, 1]
             dist_coast — distance from each ocean cell to nearest land,
                          normalized to [0, 1]; land cells are 0.
+            bathy      — (optional) normalized water depth; land cells are 0.
     """
     from scipy import ndimage
 
@@ -77,37 +88,62 @@ def geometry_channels(land_mask: torch.Tensor) -> torch.Tensor:
     xs = np.linspace(-1.0, 1.0, W, dtype=np.float32)[None, :].repeat(H, axis=0)
     ys = np.linspace(-1.0, 1.0, H, dtype=np.float32)[:, None].repeat(W, axis=1)
 
-    # EDT of the ocean mask: distance from each ocean cell to the nearest land
-    # (zero) cell.  Land cells are 0 in the input, hence 0 distance.
     dist = ndimage.distance_transform_edt(ocean).astype(np.float32)
     dmax = float(dist.max())
     if dmax > 0:
         dist = dist / dmax
     dist[land] = 0.0
 
-    geom = np.stack([xs, ys, dist], axis=0)            # (3, H, W)
+    channels = [xs, ys, dist]
+
+    if bathy is not None:
+        b = np.asarray(bathy, dtype=np.float32).copy()
+        b[land] = 0.0
+        bmax = float(b[ocean].max()) if ocean.any() else 1.0
+        if bmax > 0:
+            b = b / bmax
+        channels.append(b)
+
+    geom = np.stack(channels, axis=0)               # (3 or 4, H, W)
     return torch.from_numpy(geom)
 
 
 def observation_channels(field: torch.Tensor,
-                         path_mask: np.ndarray) -> torch.Tensor:
+                         path_mask: np.ndarray,
+                         land_np: np.ndarray) -> torch.Tensor:
     """
-    Build the 3 soft-observation channels by revealing ``field`` on a path.
+    Build the 4 soft-observation channels by revealing ``field`` on a path.
 
     Args:
         field:     (2, H, W) tensor — the (normalized) ground-truth field.
         path_mask: (H, W) bool array — True where the robot measured.
+        land_np:   (H, W) bool array — True = land (for EDT masking).
 
     Returns:
-        (3, H, W) float32 tensor: [obs_u, obs_v, path_mask]
-            obs_u / obs_v — field components on the path, 0 elsewhere
-            path_mask     — 1.0 on observed cells, 0.0 elsewhere
+        (4, H, W) float32 tensor: [obs_u, obs_v, path_mask, dist_to_path]
+            obs_u / obs_v  — field components on the path, 0 elsewhere
+            path_mask      — 1.0 on observed cells, 0.0 elsewhere
+            dist_to_path   — Euclidean distance to nearest observed cell,
+                             normalized to [0, 1] over ocean cells; land = 0.
     """
+    from scipy import ndimage
+
     pm = torch.from_numpy(np.asarray(path_mask, dtype=bool))
-    obs = torch.zeros_like(field)                       # (2, H, W)
+    obs = torch.zeros_like(field)                    # (2, H, W)
     obs[:, pm] = field[:, pm]
-    mask = pm.float()[None]                             # (1, H, W)
-    return torch.cat([obs, mask], dim=0)                # (3, H, W)
+    mask = pm.float()[None]                          # (1, H, W)
+
+    # distance to nearest observed cell, normalized over ocean
+    pm_np = pm.numpy()
+    ocean_np = ~land_np
+    dist = ndimage.distance_transform_edt(~pm_np).astype(np.float32)
+    dist[land_np] = 0.0
+    dmax = float(dist[ocean_np].max()) if ocean_np.any() and dist[ocean_np].max() > 0 else 1.0
+    dist = dist / dmax
+    dist[land_np] = 0.0
+    dist_t = torch.from_numpy(dist)[None]            # (1, H, W)
+
+    return torch.cat([obs, mask, dist_t], dim=0)     # (4, H, W)
 
 
 def assemble_cond(obs: torch.Tensor,
@@ -119,12 +155,12 @@ def assemble_cond(obs: torch.Tensor,
     This is the SINGLE source of truth for channel ordering, used by both the
     dataset (training) and the inference code, so they can never disagree.
 
-        [ obs (3) | priors (2*len(lags)) | geom (3) ]
+        [ obs (4) | priors (2*len(lags)) | geom (3 or 4) ]
 
     Args:
-        obs:    (3, H, W)            observation channels
+        obs:    (4, H, W)            observation channels
         priors: (2*len(lags), H, W)  temporal-prior channels
-        geom:   (3, H, W)            static geometry channels
+        geom:   (3 or 4, H, W)      static geometry channels
 
     Returns:
         (C, H, W) conditioning tensor.
@@ -143,7 +179,7 @@ class ConditionalOceanDataset(Dataset):
           "cond":   (C, H, W),   # assembled conditioning (see assemble_cond)
         }
 
-    where C = 3 (obs) + 2*len(lags) (priors) + 3 (geom).
+    where C = 4 (obs) + 2*len(lags) (priors) + 3 or 4 (geom).
 
     Args:
         pickle_path: path to a ``chrono_v1`` pickle (built by
@@ -201,13 +237,10 @@ class ConditionalOceanDataset(Dataset):
         self.split = split
         self.split_name = split_name
 
-        # One continuous chronological array, shared by all splits; the split is
-        # just the set of TARGET frame indices into it.  Priors index the same
-        # array, so fields[f - L] is always the genuine earlier field.
         fields_np = np.asarray(data["fields"], dtype=np.float32)  # (N, 2, H, W)
         N = fields_np.shape[0]
         self.land_mask = torch.from_numpy(
-            np.asarray(data["land_mask"], dtype=bool))            # (H, W)
+            np.asarray(data["land_mask"], dtype=bool))
         self.fields = torch.from_numpy(np.nan_to_num(fields_np, nan=0.0))
 
         self.valid = np.asarray(data["splits"][split_name], dtype=np.int64)
@@ -224,29 +257,29 @@ class ConditionalOceanDataset(Dataset):
                 f"split {split_name!r} target index out of range for N={N}")
 
         self.data_mean = data_mean
-        self.data_std = data_std
+        self.data_std  = data_std
         if data_mean is not None and data_std is not None:
             self.fields = (self.fields - data_mean) / max(float(data_std), 1e-8)
-            self.fields[:, :, self.land_mask] = 0.0          # re-zero land
+            self.fields[:, :, self.land_mask] = 0.0
+
+        # Optional bathymetry stored in the pickle (added by build_chrono_dataset.py).
+        bathy_np = data.get("bathy", None)
+        if bathy_np is not None:
+            bathy_np = np.asarray(bathy_np, dtype=np.float32)
 
         # Geometry is static — compute once.
-        self.geom = geometry_channels(self.land_mask)        # (3, H, W)
+        self.geom = geometry_channels(self.land_mask, bathy=bathy_np)  # (3 or 4, H, W)
+        self.has_bathy = bathy_np is not None
 
         self._land_np = self.land_mask.cpu().numpy()
 
     @staticmethod
     def compute_stats(pickle_path: str, split: int = 0) -> tuple[float, float]:
-        """Return (mean, std) used for normalization.
-
-        For a ``chrono_v1`` pickle these were precomputed over the TRAIN-split
-        ocean cells at build time and stored, so every split (and inference)
-        normalizes with exactly the same constants.
-        """
+        """Return (mean, std) used for normalization."""
         with open(pickle_path, "rb") as f:
             data = pickle.load(f)
         if isinstance(data, dict) and data.get("format") == "chrono_v1":
             return float(data.get("data_mean", 0.0)), float(data["data_std"])
-        # Legacy list-of-splits pickle (unconditional pipeline).
         return OceanCurrentDataset.compute_stats(pickle_path, split)
 
     def _sample_path_steps(self, rng: np.random.Generator) -> int:
@@ -261,16 +294,16 @@ class ConditionalOceanDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         f = int(self.valid[idx])
         target = self.fields[f]                              # (2, H, W)
-        priors = torch.cat([self.fields[f - L] for L in self.lags], dim=0)  # (2*nlags, H, W)
+        priors = torch.cat([self.fields[f - L] for L in self.lags], dim=0)
 
         seed = idx if self.deterministic else None
-        rng = np.random.default_rng(seed)
-        n_steps = self._sample_path_steps(rng)
+        rng  = np.random.default_rng(seed)
+        n_steps  = self._sample_path_steps(rng)
         path_mask = biased_walk_path(
             self._land_np, n_steps=n_steps, seed=seed,
             straight_bias=self.straight_bias,
         )
 
-        obs = observation_channels(target, path_mask)        # (3, H, W)
-        cond = assemble_cond(obs, priors, self.geom)         # (C, H, W)
+        obs  = observation_channels(target, path_mask, self._land_np)  # (4, H, W)
+        cond = assemble_cond(obs, priors, self.geom)                   # (C, H, W)
         return {"target": target, "cond": cond}

@@ -75,7 +75,7 @@ class CondMagnitudeDataset(Dataset):
         self.speed_mean = float(speed_mean)
         self.speed_std = float(speed_std)
         self.data_std = float(data_std)
-        self.cond_ch = cond_channels(lags)
+        self.cond_ch = self.ds.geom.shape[0] + 4 + 2 * len(lags)  # matches cond_channels(lags, has_bathy)
         self._ocean_ch = torch.from_numpy(self.ocean.astype(np.float32))[None]
 
     def __len__(self) -> int:
