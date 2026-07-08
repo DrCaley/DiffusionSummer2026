@@ -38,10 +38,9 @@ from diffusion     import DDPM
 from repaint_model import Repaint
 from repaint_infer import biased_walk_path
 
-SEEDS = [0, 7, 14, 21, 28, 35, 42, 49, 56, 63,
-         70, 77, 84, 91, 98, 105, 112, 119, 126, 133]
+SEEDS = list(range(0, 700, 7))  # 100 seeds: 0,7,14,...,693
 
-METHODS = [
+ALL_METHODS = [
     "RePaint r=10",
     "RePaint r=1",
     "DPS z=0.5",
@@ -180,7 +179,8 @@ def save_bar_chart(all_rmse, all_times, T, stride, n_seeds, out_path):
     w = 0.55
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    fig.suptitle(f"T={T} / stride={stride}  —  All 8 Methods, {n_seeds} seeds", fontsize=11)
+    n_methods = len(methods)
+    fig.suptitle(f"T={T} / stride={stride}  —  {n_methods} Methods, {n_seeds} seeds", fontsize=11)
 
     ax = axes[0]
     bars = ax.bar(x, rmse, w, yerr=std, capsize=5, color=colors, alpha=0.85)
@@ -223,6 +223,8 @@ def parse_args():
     p.add_argument("--time_dim",   type=int,   default=256)
     p.add_argument("--n_seeds",    type=int,   default=None)
     p.add_argument("--out_dir",    default=None)
+    p.add_argument("--no_rd_r10",  action="store_true",
+                   help="Exclude RD r=10 z=0.5 and RD r=10 z=0.04 methods")
     return p.parse_args()
 
 
@@ -237,9 +239,13 @@ def main():
                                     f"all8_T{args.T}_s{stride}")
     os.makedirs(args.out_dir, exist_ok=True)
 
+    METHODS = [m for m in ALL_METHODS
+               if not (args.no_rd_r10 and m.startswith("RD r=10"))]
+
     print(f"Device     : {device}")
     print(f"T          : {args.T}  stride={stride}  "
           f"({len(range(0, args.T, stride))} diffusion steps)")
+    print(f"Methods    : {len(METHODS)} ({', '.join(METHODS)})")
     print(f"Checkpoint : {args.checkpoint}")
     print(f"Output dir : {args.out_dir}", flush=True)
 
@@ -308,10 +314,11 @@ def main():
         row += [r, t]
         r, t = run_method("DPS z=0.04",     dps_infer,     model, diffusion, x0_obs, path_mask, land_mask_np, device=device, stride=stride, step_size=0.04)
         row += [r, t]
-        r, t = run_method("RD r=10 z=0.5",  repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=10, device=device, stride=stride, step_size=0.5)
-        row += [r, t]
-        r, t = run_method("RD r=10 z=0.04", repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=10, device=device, stride=stride, step_size=0.04)
-        row += [r, t]
+        if not args.no_rd_r10:
+            r, t = run_method("RD r=10 z=0.5",  repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=10, device=device, stride=stride, step_size=0.5)
+            row += [r, t]
+            r, t = run_method("RD r=10 z=0.04", repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=10, device=device, stride=stride, step_size=0.04)
+            row += [r, t]
         r, t = run_method("RD r=1 z=0.5",   repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=1,  device=device, stride=stride, step_size=0.5)
         row += [r, t]
         r, t = run_method("RD r=1 z=0.04",  repaint_dps_infer, model, diffusion, x0_obs, path_mask, land_mask_np, r=1,  device=device, stride=stride, step_size=0.04)
@@ -333,7 +340,7 @@ def main():
     # ── Summary
     summary_path = os.path.join(args.out_dir, "summary.txt")
     with open(summary_path, "w") as f:
-        f.write(f"All 8 Methods  —  T={args.T}  stride={stride}\n")
+        f.write(f"{len(METHODS)} Methods  —  T={args.T}  stride={stride}\n")
         f.write(f"Checkpoint : {args.checkpoint}\n")
         f.write(f"Schedule   : {schedule}   noise_std={noise_std:.5f}\n")
         f.write(f"N seeds    : {n_total}\n\n")
