@@ -218,7 +218,10 @@ def build_cond(ds, idx, path_steps, seed):
     priors = torch.cat([ds.fields[f - L] for L in ds.lags], dim=0)
     path_mask = biased_walk_path(ds._land_np, n_steps=path_steps,
                                  seed=seed, straight_bias=ds.straight_bias)
-    obs  = observation_channels(target, path_mask, ds._land_np)  # (4, H, W)
+    # old models had 3 obs channels (no dist_to_path); default to the new 4-ch
+    # layout when the caller didn't tag the dataset with the checkpoint's cond_ch.
+    legacy_obs = (getattr(ds, "cond_ch", 11) <= 10)
+    obs  = observation_channels(target, path_mask, ds._land_np, legacy=legacy_obs)
     cond = assemble_cond(obs, priors, ds.geom)                   # (C, H, W)
     return {"target": target, "priors": priors, "cond": cond, "path_mask": path_mask}
 
@@ -519,6 +522,7 @@ def main():
         data_mean=data_mean, data_std=data_std,
         path_steps=args.path_steps, deterministic=True,
     )
+    ds.cond_ch = cond_ch  # propagate for legacy obs detection in build_cond
     land_np  = ds.land_mask.cpu().numpy().astype(bool)
     ocean_np = ~land_np
     n_ocean  = int(ocean_np.sum())

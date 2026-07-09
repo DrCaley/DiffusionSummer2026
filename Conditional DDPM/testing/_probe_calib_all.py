@@ -287,6 +287,7 @@ def main():
         args.pickle, split=args.split, lags=lags,
         data_mean=ckpt.get("data_mean", 0.0), data_std=data_std,
         path_steps=args.path_steps, deterministic=True)
+    ds.cond_ch = cond_ch  # propagate to build_cond for legacy obs detection
     land_np = ds.land_mask.cpu().numpy().astype(bool); ocean_np = ~land_np
     n_ocean = max(int(ocean_np.sum()), 1)
 
@@ -356,11 +357,13 @@ def main():
 
         # ---- UNet-restored speeds for the model side ----
         spd_phys = np.sqrt((src ** 2).sum(axis=0)) * data_std
-        speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
-                                        land_np, data_std, device, cond=b["cond"])
         if args.fuse_mode == "replace":
+            speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
+                                            land_np, data_std, device, cond=b["cond"])
             members_fix = apply_unet_magnitude(members, speed_norm, ocean_np)
         elif args.fuse_mode == "reinject":
+            speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
+                                            land_np, data_std, device, cond=b["cond"])
             members_fix = reinject_magnitude(members, speed_norm, ocean_np)
         elif args.fuse_mode == "hetero":
             mu_n, sig_n = predict_speed_mean_sigma(
