@@ -1,4 +1,4 @@
-Using model:
+
 
 
 Test:
@@ -24,5 +24,4 @@ Find the average RMSE and time for each method.
 
 Record all of this data into files.
 
-Graph the average RMSE and time if an
 
