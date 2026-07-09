@@ -209,6 +209,7 @@ def main():
         args.pickle, split=args.split, lags=lags,
         data_mean=ckpt.get("data_mean", 0.0), data_std=data_std,
         path_steps=args.path_steps, deterministic=True)
+    ds.cond_ch = cond_ch  # propagate for legacy obs detection in build_cond
     land_np = ds.land_mask.cpu().numpy().astype(bool); ocean_np = ~land_np
 
     model = IC.StreamFunctionUNet(in_ch=2, base_ch=ca.get("base_ch", 64),
@@ -218,7 +219,10 @@ def main():
         device=device, noise_type=ca.get("noise_type", "div_free"),
         spectral_filter=ckpt.get("spectral_filter", None))
 
-    mag_net, sm, ss = load_magnitude_model(args.mag_checkpoint, device)
+    if args.fuse_mode in ("replace", "reinject"):
+        mag_net, sm, ss = load_magnitude_model(args.mag_checkpoint, device)
+    else:
+        mag_net = sm = ss = None
 
     if args.frame >= 0:
         # --frame is a FRAME number (value in ds.valid); fall back to treating it
@@ -244,12 +248,14 @@ def main():
                                       sargs, device, base_seed=src_idx)
 
     spd_phys = np.sqrt((src ** 2).sum(axis=0)) * data_std
-    speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
-                                    land_np, data_std, device, cond=b["cond"])
     if args.fuse_mode == "replace":
+        speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
+                                        land_np, data_std, device, cond=b["cond"])
         draws = apply_unet_magnitude(members, speed_norm, ocean_np)
         mode_lbl = "diffusion direction x conditioned-UNet speed (deterministic mag)"
     elif args.fuse_mode == "reinject":
+        speed_norm = predict_speed_norm(mag_net, sm, ss, spd_phys, pm,
+                                        land_np, data_std, device, cond=b["cond"])
         draws = reinject_magnitude(members, speed_norm, ocean_np)
         mode_lbl = "UNet speed x per-draw relative magnitude (reinjected)"
     elif args.fuse_mode == "hetero":
