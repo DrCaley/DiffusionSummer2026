@@ -1,0 +1,7 @@
+Latent DPS Evaluation
+n_samples=50  path_steps=150  seed=42
+ζ=0.04  T=1000
+
+Method                  Mean RMSE        Std        Min        Max
+------------------------------------------------------------------
+ldm_dps                  0.052267   0.022269   0.025625   0.163323

@@ -1,0 +1,161 @@
+Device: cuda
+Physics-Informed: schedule=linear  noise_std=0.11619
+Linear-CurlDiv  : schedule=linear  noise_std=0.11619
+Seeds (50): [0, 7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140, 147, 154, 161, 168, 175, 182, 189, 196, 203, 210, 217, 224, 231, 238, 245, 252, 259, 266, 273, 280, 287, 294, 301, 308, 315, 322, 329, 336, 343]
+
+[01/50] seed=0  sample=0  path_cells=122
+  Physics-Informed  : rmse=0.1323  mag_err=0.0954  angle_err= 55.62°  t=1.1s
+  Linear-CurlDiv    : rmse=0.1290  mag_err=0.0674  angle_err= 51.92°  t=0.7s
+[02/50] seed=7  sample=7  path_cells=131
+  Physics-Informed  : rmse=0.2077  mag_err=0.1687  angle_err= 59.57°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1497  mag_err=0.1160  angle_err= 18.40°  t=0.7s
+[03/50] seed=14  sample=14  path_cells=110
+  Physics-Informed  : rmse=0.1064  mag_err=0.0670  angle_err= 59.60°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1794  mag_err=0.1059  angle_err= 71.98°  t=0.6s
+[04/50] seed=21  sample=21  path_cells=135
+  Physics-Informed  : rmse=0.0969  mag_err=0.0637  angle_err= 59.89°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0801  mag_err=0.0399  angle_err= 38.19°  t=0.7s
+[05/50] seed=28  sample=28  path_cells=147
+  Physics-Informed  : rmse=0.1212  mag_err=0.0904  angle_err= 25.01°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0887  mag_err=0.0407  angle_err= 45.99°  t=0.7s
+[06/50] seed=35  sample=35  path_cells=140
+  Physics-Informed  : rmse=0.0323  mag_err=0.0127  angle_err= 63.10°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1032  mag_err=0.0666  angle_err= 55.67°  t=0.7s
+[07/50] seed=42  sample=42  path_cells=140
+  Physics-Informed  : rmse=0.0741  mag_err=0.0490  angle_err= 33.66°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1412  mag_err=0.0748  angle_err= 56.76°  t=0.7s
+[08/50] seed=49  sample=49  path_cells=132
+  Physics-Informed  : rmse=0.0669  mag_err=0.0331  angle_err= 68.13°  t=0.7s
+  Linear-CurlDiv    : rmse=0.4300  mag_err=0.2709  angle_err= 89.64°  t=0.7s
+[09/50] seed=56  sample=56  path_cells=145
+  Physics-Informed  : rmse=0.1410  mag_err=0.0841  angle_err= 72.01°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1218  mag_err=0.0813  angle_err= 34.41°  t=0.7s
+[10/50] seed=63  sample=63  path_cells=139
+  Physics-Informed  : rmse=0.0762  mag_err=0.0339  angle_err= 81.07°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1200  mag_err=0.0455  angle_err= 85.88°  t=0.7s
+[11/50] seed=70  sample=70  path_cells=138
+  Physics-Informed  : rmse=0.1813  mag_err=0.1460  angle_err= 33.20°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1413  mag_err=0.1049  angle_err= 46.37°  t=0.7s
+[12/50] seed=77  sample=77  path_cells=125
+  Physics-Informed  : rmse=0.1439  mag_err=0.0977  angle_err= 76.98°  t=0.6s
+  Linear-CurlDiv    : rmse=0.2083  mag_err=0.0580  angle_err=120.73°  t=0.6s
+[13/50] seed=84  sample=84  path_cells=133
+  Physics-Informed  : rmse=0.1113  mag_err=0.0573  angle_err= 68.79°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2121  mag_err=0.1562  angle_err= 39.14°  t=0.6s
+[14/50] seed=91  sample=91  path_cells=137
+  Physics-Informed  : rmse=0.1789  mag_err=0.1329  angle_err= 55.28°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1157  mag_err=0.0550  angle_err= 38.64°  t=0.7s
+[15/50] seed=98  sample=98  path_cells=129
+  Physics-Informed  : rmse=0.1691  mag_err=0.1379  angle_err= 42.10°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1848  mag_err=0.1041  angle_err= 73.55°  t=0.7s
+[16/50] seed=105  sample=105  path_cells=144
+  Physics-Informed  : rmse=0.0400  mag_err=0.0123  angle_err= 84.00°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1547  mag_err=0.1142  angle_err= 74.89°  t=0.7s
+[17/50] seed=112  sample=112  path_cells=145
+  Physics-Informed  : rmse=0.1180  mag_err=0.0963  angle_err= 32.92°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0922  mag_err=0.0299  angle_err= 34.47°  t=0.7s
+[18/50] seed=119  sample=119  path_cells=134
+  Physics-Informed  : rmse=0.0411  mag_err=0.0173  angle_err= 64.02°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1861  mag_err=0.1342  angle_err= 65.74°  t=0.6s
+[19/50] seed=126  sample=126  path_cells=133
+  Physics-Informed  : rmse=0.0594  mag_err=0.0241  angle_err= 74.16°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2004  mag_err=0.1430  angle_err= 95.55°  t=0.6s
+[20/50] seed=133  sample=133  path_cells=139
+  Physics-Informed  : rmse=0.1964  mag_err=0.1545  angle_err= 79.27°  t=0.7s
+  Linear-CurlDiv    : rmse=0.4543  mag_err=0.1124  angle_err=112.27°  t=0.7s
+[21/50] seed=140  sample=140  path_cells=127
+  Physics-Informed  : rmse=0.1611  mag_err=0.1139  angle_err= 43.22°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1458  mag_err=0.1014  angle_err= 47.83°  t=0.6s
+[22/50] seed=147  sample=147  path_cells=121
+  Physics-Informed  : rmse=0.1481  mag_err=0.1045  angle_err= 86.81°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2035  mag_err=0.0823  angle_err= 68.28°  t=0.6s
+[23/50] seed=154  sample=154  path_cells=137
+  Physics-Informed  : rmse=0.1026  mag_err=0.0593  angle_err= 76.46°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1074  mag_err=0.0514  angle_err= 61.84°  t=0.6s
+[24/50] seed=161  sample=161  path_cells=124
+  Physics-Informed  : rmse=0.0830  mag_err=0.0374  angle_err= 83.28°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1672  mag_err=0.1026  angle_err= 58.38°  t=0.6s
+[25/50] seed=168  sample=168  path_cells=137
+  Physics-Informed  : rmse=0.1279  mag_err=0.0952  angle_err= 41.08°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0988  mag_err=0.0589  angle_err= 42.53°  t=0.7s
+[26/50] seed=175  sample=175  path_cells=138
+  Physics-Informed  : rmse=0.1651  mag_err=0.1146  angle_err= 64.61°  t=0.6s
+  Linear-CurlDiv    : rmse=0.2777  mag_err=0.0827  angle_err=110.26°  t=0.7s
+[27/50] seed=182  sample=182  path_cells=145
+  Physics-Informed  : rmse=0.0829  mag_err=0.0686  angle_err= 23.86°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1955  mag_err=0.0578  angle_err= 76.36°  t=0.7s
+[28/50] seed=189  sample=189  path_cells=143
+  Physics-Informed  : rmse=0.1013  mag_err=0.0603  angle_err= 74.73°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1945  mag_err=0.0288  angle_err=112.49°  t=0.7s
+[29/50] seed=196  sample=196  path_cells=116
+  Physics-Informed  : rmse=0.0723  mag_err=0.0547  angle_err= 33.44°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1240  mag_err=0.0397  angle_err= 85.44°  t=0.7s
+[30/50] seed=203  sample=203  path_cells=135
+  Physics-Informed  : rmse=0.2027  mag_err=0.1584  angle_err= 38.17°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0570  mag_err=0.0324  angle_err= 20.39°  t=0.7s
+[31/50] seed=210  sample=210  path_cells=133
+  Physics-Informed  : rmse=0.1261  mag_err=0.0860  angle_err= 56.05°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1719  mag_err=0.0623  angle_err= 99.53°  t=0.7s
+[32/50] seed=217  sample=217  path_cells=148
+  Physics-Informed  : rmse=0.0734  mag_err=0.0535  angle_err= 39.49°  t=0.7s
+  Linear-CurlDiv    : rmse=0.0822  mag_err=0.0409  angle_err= 33.74°  t=0.7s
+[33/50] seed=224  sample=224  path_cells=139
+  Physics-Informed  : rmse=0.0649  mag_err=0.0421  angle_err= 51.42°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2543  mag_err=0.1363  angle_err= 91.63°  t=0.7s
+[34/50] seed=231  sample=231  path_cells=137
+  Physics-Informed  : rmse=0.1626  mag_err=0.1325  angle_err= 21.03°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1081  mag_err=0.0698  angle_err= 18.23°  t=0.7s
+[35/50] seed=238  sample=238  path_cells=141
+  Physics-Informed  : rmse=0.1345  mag_err=0.0898  angle_err= 46.28°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1455  mag_err=0.0941  angle_err= 64.32°  t=0.7s
+[36/50] seed=245  sample=245  path_cells=139
+  Physics-Informed  : rmse=0.1461  mag_err=0.1110  angle_err= 58.17°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1133  mag_err=0.0695  angle_err= 30.26°  t=0.6s
+[37/50] seed=252  sample=252  path_cells=130
+  Physics-Informed  : rmse=0.1202  mag_err=0.0638  angle_err=104.09°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2148  mag_err=0.0756  angle_err= 79.82°  t=0.7s
+[38/50] seed=259  sample=259  path_cells=133
+  Physics-Informed  : rmse=0.0629  mag_err=0.0328  angle_err= 50.94°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1774  mag_err=0.1189  angle_err= 52.68°  t=0.7s
+[39/50] seed=266  sample=266  path_cells=136
+  Physics-Informed  : rmse=0.1498  mag_err=0.0999  angle_err= 74.94°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1517  mag_err=0.0500  angle_err= 70.05°  t=0.7s
+[40/50] seed=273  sample=273  path_cells=141
+  Physics-Informed  : rmse=0.2094  mag_err=0.1660  angle_err= 33.18°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2557  mag_err=0.1540  angle_err= 84.30°  t=0.7s
+[41/50] seed=280  sample=280  path_cells=130
+  Physics-Informed  : rmse=0.0680  mag_err=0.0400  angle_err= 62.61°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1114  mag_err=0.0694  angle_err= 55.23°  t=0.7s
+[42/50] seed=287  sample=287  path_cells=141
+  Physics-Informed  : rmse=0.0992  mag_err=0.0396  angle_err= 81.65°  t=0.6s
+  Linear-CurlDiv    : rmse=0.1425  mag_err=0.0826  angle_err= 53.61°  t=0.6s
+[43/50] seed=294  sample=294  path_cells=130
+  Physics-Informed  : rmse=0.1567  mag_err=0.1036  angle_err= 77.40°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1085  mag_err=0.0570  angle_err= 52.81°  t=0.7s
+[44/50] seed=301  sample=301  path_cells=134
+  Physics-Informed  : rmse=0.1085  mag_err=0.0725  angle_err= 68.37°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1977  mag_err=0.1479  angle_err= 38.42°  t=0.7s
+[45/50] seed=308  sample=308  path_cells=126
+  Physics-Informed  : rmse=0.1504  mag_err=0.1002  angle_err= 75.96°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1825  mag_err=0.0843  angle_err= 93.69°  t=0.7s
+[46/50] seed=315  sample=315  path_cells=140
+  Physics-Informed  : rmse=0.1948  mag_err=0.1496  angle_err= 41.72°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2087  mag_err=0.1334  angle_err= 54.39°  t=0.7s
+[47/50] seed=322  sample=322  path_cells=145
+  Physics-Informed  : rmse=0.0423  mag_err=0.0214  angle_err= 25.68°  t=0.7s
+  Linear-CurlDiv    : rmse=0.1767  mag_err=0.1005  angle_err= 87.16°  t=0.7s
+[48/50] seed=329  sample=329  path_cells=132
+  Physics-Informed  : rmse=0.1967  mag_err=0.1614  angle_err= 44.26°  t=0.7s
+  Linear-CurlDiv    : rmse=0.3345  mag_err=0.0752  angle_err=113.46°  t=0.7s
+[49/50] seed=336  sample=336  path_cells=127
+  Physics-Informed  : rmse=0.1083  mag_err=0.0427  angle_err= 75.56°  t=0.7s
+  Linear-CurlDiv    : rmse=0.2240  mag_err=0.0721  angle_err=107.98°  t=0.6s
+[50/50] seed=343  sample=343  path_cells=140
+  Physics-Informed  : rmse=0.1411  mag_err=0.0869  angle_err= 76.07°  t=0.6s
+  Linear-CurlDiv    : rmse=0.2043  mag_err=0.0502  angle_err=113.30°  t=0.7s
+
+CSV saved     : /workspace/DiffusionSummer2026/Repaint_vs_DPS_results/physics_vs_linear_repaint_r1_s10_50seeds/results.csv
+Summary saved : /workspace/DiffusionSummer2026/Repaint_vs_DPS_results/physics_vs_linear_repaint_r1_s10_50seeds/summary.txt
+Bar chart saved: /workspace/DiffusionSummer2026/Repaint_vs_DPS_results/physics_vs_linear_repaint_r1_s10_50seeds/bar_chart.png
+
+Done.

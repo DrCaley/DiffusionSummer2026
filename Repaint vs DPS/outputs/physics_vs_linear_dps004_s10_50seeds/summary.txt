@@ -1,0 +1,10 @@
+Physics-Informed vs Linear-CurlDiv  —  DPS zeta=0.04  T=1000  stride=10
+Physics checkpoint : /workspace/DiffusionSummer2026/Physics Informed/best_model_physics_ocean.pt
+Linear  checkpoint : /workspace/DiffusionSummer2026/Repaint vs DPS/best-model-linear-curldiv-gaussian/checkpoints_linear/best_model_linear.pt
+N seeds            : 50
+Path steps         : 150
+
+Model                 Mean RMSE  Std RMSE  Mean MagErr  Mean AngErr(deg)  Mean Time(s)
+----------------------------------------------------------------------------------------
+Physics-Informed         0.0887    0.0356       0.0519             39.77          2.64
+Linear-CurlDiv           0.0694    0.0227       0.0371             30.16          2.62

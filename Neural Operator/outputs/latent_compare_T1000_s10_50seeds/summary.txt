@@ -1,0 +1,11 @@
+Latent FNO-DDPM Comparison  —  T=1000  stride=10
+Autoencoder checkpoint : /root/NeuralOperator/checkpoints_fno_autoencoder/best_fno_autoencoder.pt
+Latent DDPM checkpoint : /root/NeuralOperator/checkpoints_latent_fno_ddpm/best_latent_fno_ddpm_linear.pt
+N seeds                : 50
+Path steps             : 150
+
+Method          Mean RMSE  Std RMSE  Mean MagErr  Mean AngErr(deg)  Mean Time(s)
+------------------------------------------------------------------------------
+RePaint r=10       0.2274    0.0901       0.1314             68.38          4.29
+RePaint r=1        0.2242    0.0933       0.1308             73.02          0.41
+DPS z=0.04         0.1417    0.0488       0.0791             66.42          1.60

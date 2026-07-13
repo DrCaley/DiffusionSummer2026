@@ -1,0 +1,9 @@
+RMSE Evaluation (RePaint resample=1 for diffusion models)
+n_samples=50, sample_start=0, path_steps=150
+
+Model                         Mean RMSE          Std          Min          Max
+------------------------------------------------------------------------------
+base_repaint_r1                0.104459     0.043158     0.027776     0.243942
+physics_repaint_r1             0.073986     0.036619     0.021547     0.188748
+autoencoder                    0.060219     0.031648     0.024564     0.171975
+atmodist_retrieval             0.102453     0.042344     0.045912     0.244502

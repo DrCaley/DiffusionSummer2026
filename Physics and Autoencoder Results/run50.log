@@ -1,0 +1,26 @@
+nohup: ignoring input
+Device: cuda
+Processed 5/50
+Processed 10/50
+Processed 15/50
+Processed 20/50
+Processed 25/50
+Processed 30/50
+Processed 35/50
+Processed 40/50
+Processed 45/50
+Processed 50/50
+
+RMSE Evaluation (RePaint resample=1 for diffusion models)
+n_samples=50, sample_start=0, path_steps=150
+
+Model                         Mean RMSE          Std          Min          Max
+------------------------------------------------------------------------------
+base_repaint_r1                0.161173     0.068052     0.031829     0.325344
+physics_repaint_r1             0.091826     0.024290     0.051052     0.162611
+autoencoder                    0.102142     0.036998     0.040118     0.188359
+atmodist_retrieval             0.102136     0.035534     0.053157     0.203191
+
+Saved: /root/stjohn_ddpm/discord_paper_results/rmse_summary.txt
+Saved: /root/stjohn_ddpm/discord_paper_results/rmse_summary.csv
+Saved: /root/stjohn_ddpm/discord_paper_results/rmse_per_sample.csv

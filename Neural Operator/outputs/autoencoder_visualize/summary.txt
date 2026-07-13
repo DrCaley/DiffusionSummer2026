@@ -1,0 +1,13 @@
+FNO Autoencoder — plain encode/decode inference (no diffusion)
+Checkpoint : /root/NeuralOperator/checkpoints_fno_autoencoder/best_fno_autoencoder.pt
+N samples  : 5
+
+   idx       RMSE     MagErr  AngErr(deg)
+------------------------------------------
+     0    0.00364    0.00165        1.938
+   393    0.00474    0.00198        2.727
+   786    0.00596    0.00299        2.356
+  1179    0.00440    0.00185        2.326
+  1572    0.00562    0.00256        1.569
+------------------------------------------
+  mean    0.00487    0.00221        2.183
