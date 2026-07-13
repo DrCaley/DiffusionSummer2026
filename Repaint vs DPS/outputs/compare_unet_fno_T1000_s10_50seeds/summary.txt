@@ -1,0 +1,14 @@
+UNet vs FNO-DDPM Comparison  —  T=1000  stride=10
+UNet checkpoint : /root/Repaint_vs_DPS/checkpoints_linear/best_model_linear.pt
+FNO  checkpoint : /root/NeuralOperator/checkpoints_fno_ddpm/best_fno_ddpm_linear.pt
+N seeds         : 50
+Path steps      : 150
+
+Model / Method          Mean RMSE  Std RMSE  Mean MagErr  Mean AngErr(deg)  Mean Time(s)
+------------------------------------------------------------------------------------------
+UNet / RePaint r=10        0.1489    0.0853       0.0678             51.16          6.60
+UNet / RePaint r=1         0.1420    0.0693       0.0694             58.59          0.63
+UNet / DPS z=0.04          0.0746    0.0245       0.0387             31.95          2.40
+FNO / RePaint r=10         0.1361    0.0516       0.0701             50.38          4.47
+FNO / RePaint r=1          0.1534    0.0492       0.0749             63.60          0.42
+FNO / DPS z=0.04           0.1041    0.0365       0.0518             51.45          1.78
