@@ -171,11 +171,15 @@ def main():
 
     # ---- warm-start mean + backbone from the deterministic UNet ----
     init = torch.load(args.init_checkpoint, map_location=device, weights_only=False)
-    missing, unexpected = model.load_state_dict(init["model"], strict=False)
-    loaded = [k for k in init["model"] if k in dict(model.named_parameters())
-              or k in dict(model.named_buffers())]
+    # Filter out keys whose shape doesn't match (e.g. first conv when cond_ch changed).
+    model_params = {**dict(model.named_parameters()), **dict(model.named_buffers())}
+    filtered = {k: v for k, v in init["model"].items()
+                if k in model_params and v.shape == model_params[k].shape}
+    skipped = [k for k in init["model"] if k not in filtered]
+    missing, unexpected = model.load_state_dict(filtered, strict=False)
     print(f"warm-start from {os.path.basename(args.init_checkpoint)}: "
-          f"loaded {len(loaded)} tensors; new (variance head) = {missing}")
+          f"loaded {len(filtered)} tensors; skipped (shape mismatch) = {skipped}; "
+          f"new (uninitialised) = {missing}")
 
     # ---- freeze everything except the log-variance head ----
     if not args.train_backbone:

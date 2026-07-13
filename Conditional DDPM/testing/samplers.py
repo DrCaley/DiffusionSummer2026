@@ -142,6 +142,67 @@ def vanilla_ensemble(stream_model, diffusion, cond, land_np, *,
 
 
 # ===========================================================================
+# 1b.  DPM-Solver++(2M) — deterministic ODE sampler, batched ensemble
+# ===========================================================================
+
+@torch.no_grad()
+def dpmpp_ensemble(stream_model, diffusion, cond, land_np, *,
+                   n_members=8, inference_steps=25, device="cpu", seed=0,
+                   pred_type="x0_streamfn_cond"):
+    """DPM-Solver++(2M) multistep sampler in data-prediction (x̂₀) form.
+
+    Same trained model, no retraining.  Reaches DDPM-100 quality in ~15-25
+    steps because the 2nd-order multistep update reuses the previous x̂₀, so it
+    needs one network call per step and far fewer steps.  All ``n_members``
+    draws are denoised in a SINGLE batched forward per step (diversity comes
+    from the initial-noise seed), so wall time is ~flat in the member count on
+    a GPU.
+
+    Uses the noise-scaled marginal std sigma_t = noise_scale * sqrt(1-ᾱ_t) so
+    the log-SNR schedule matches how the model was trained.
+    """
+    H, W   = land_np.shape
+    ocean  = torch.from_numpy(~land_np).float().to(device)[None, None]
+    cond_n = cond.unsqueeze(0).to(device).expand(n_members, -1, -1, -1)
+    ns     = diffusion.noise_scale
+
+    ab     = diffusion.alpha_bar                          # (T,)
+    alpha  = ab.sqrt()                                    # α_t = √ᾱ_t
+    sigma  = ns * (1.0 - ab).sqrt()                       # σ_t (noise-scaled)
+    lamb   = torch.log(alpha) - torch.log(sigma)          # λ_t = log(α/σ)
+
+    schedule = diffusion.build_inference_schedule(inference_steps)
+    xt = _init_latent(diffusion, n_members, H, W, ocean, device, seed)
+
+    prev_x0, prev_lam = None, None
+    for t_int, t_prev_int in schedule:
+        t_t = torch.full((n_members,), t_int, device=device, dtype=torch.long)
+        x0  = _x0_hat(stream_model, diffusion, xt, t_t, cond_n, pred_type)
+        x0  = (x0 * ocean).clamp(-3.0 * ns, 3.0 * ns)
+
+        if t_prev_int < 0:                                # final step → return x̂₀
+            xt = x0
+            break
+
+        lam_s, lam_t = lamb[t_int], lamb[t_prev_int]
+        h = lam_t - lam_s
+        sig_ratio = sigma[t_prev_int] / sigma[t_int]
+        a_t = alpha[t_prev_int]
+        phi = torch.expm1(-h)                             # e^{-h} - 1
+
+        if prev_x0 is None:                               # 1st order (DDIM) bootstrap
+            D = x0
+        else:                                             # 2nd-order multistep
+            r = (lam_s - prev_lam) / h
+            D = (1.0 + 0.5 / r) * x0 - (0.5 / r) * prev_x0
+
+        xt = (sig_ratio * xt - a_t * phi * D) * ocean
+        prev_x0, prev_lam = x0, lam_s
+
+    return _members_to_numpy(xt, ocean), {}
+
+
+# ===========================================================================
 # 2.  Particle filter (SMC) — reweight + resample by observation likelihood
 # ===========================================================================
 

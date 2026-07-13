@@ -110,7 +110,8 @@ def geometry_channels(land_mask: torch.Tensor,
 
 def observation_channels(field: torch.Tensor,
                          path_mask: np.ndarray,
-                         land_np: np.ndarray) -> torch.Tensor:
+                         land_np: np.ndarray,
+                         legacy: bool = False) -> torch.Tensor:
     """
     Build the 4 soft-observation channels by revealing ``field`` on a path.
 
@@ -143,6 +144,8 @@ def observation_channels(field: torch.Tensor,
     dist[land_np] = 0.0
     dist_t = torch.from_numpy(dist)[None]            # (1, H, W)
 
+    if legacy:
+        return torch.cat([obs, mask], dim=0)          # (3, H, W) — no dist_to_path
     return torch.cat([obs, mask, dist_t], dim=0)     # (4, H, W)
 
 
